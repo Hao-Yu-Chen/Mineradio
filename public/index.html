@@ -2816,6 +2816,124 @@ var originalLyricsState = { lines: [], hasNativeKaraoke: false, timingSource: 'n
 var localBeatAnalysis = { song:null, audioUrl:'', mode:'mr', active:false, token:0 };
 var likedSongMap = {}, likeBusyMap = {}, likeStatusToken = 0;
 var collectTargetSong = null, collectBusy = false;
+// --- LX 模式独立的歌单系统（与默认模式隔离） ---
+// "我的喜欢" 是 id='lx_fav' 的特殊歌单，不可删除
+var LX_PLAYLISTS_KEY = 'mineradio-lx-playlists-v2';
+var lxPlaylists = []; // [{ id, name, songs: [{full song info}], createdAt }]
+(function(){
+  try { lxPlaylists = JSON.parse(localStorage.getItem(LX_PLAYLISTS_KEY)) || []; } catch(e) { lxPlaylists = []; }
+  // Ensure "我的喜欢" always exists
+  if (!lxPlaylists.find(function(p){ return p.id === 'lx_fav'; })) {
+    lxPlaylists.unshift({ id: 'lx_fav', name: '我的喜欢', songs: [], createdAt: new Date().toISOString() });
+  }
+})();
+function lxSongKey(song) {
+  if (!song) return '';
+  return (song.provider || song.source || '') + ':' + (song.songmid || song.id || '');
+}
+function lxGetFavoritePlaylist() { return lxPlaylists.find(function(p){ return p.id === 'lx_fav'; }); }
+function isLxSongLiked(song) {
+  var fav = lxGetFavoritePlaylist();
+  return !!(fav && fav.songs.some(function(s){ return lxSongKey(s) === lxSongKey(song); }));
+}
+function lxStoreSong(song) {
+  return {
+    name: song.name || '', artist: song.artist || song.singer || '',
+    id: song.id || '', songmid: song.songmid || song.id || '',
+    source: song.provider || song.source || '',
+    cover: song.cover || song.img || '',
+    interval: song.interval || '',
+    album: song.album || song.albumName || '',
+    albumId: song.albumId || '',
+    types: song.types || [], _types: song._types || {},
+    hash: song.hash || '', copyrightId: song.copyrightId || ''
+  };
+}
+function saveLxPlaylists() { try { localStorage.setItem(LX_PLAYLISTS_KEY, JSON.stringify(lxPlaylists)); } catch(e) {} }
+function addToLxPlaylist(plId, song) {
+  var pl = lxPlaylists.find(function(p) { return p.id === plId; });
+  if (!pl) return;
+  if (pl.songs.some(function(s) { return lxSongKey(s) === lxSongKey(song); })) {
+    showToast('歌曲已在歌单中'); return;
+  }
+  pl.songs.push(lxStoreSong(song));
+  saveLxPlaylists();
+  showToast('已收藏到 ' + pl.name);
+}
+function createLxPlaylist(name) {
+  name = (name || '').trim();
+  if (!name) { showToast('请输入歌单名称'); return null; }
+  var pl = { id: 'lx_pl_' + Date.now(), name: name, songs: [], createdAt: new Date().toISOString() };
+  lxPlaylists.push(pl);
+  saveLxPlaylists();
+  return pl;
+}
+function renderLxCollectModal() {
+  var current = document.getElementById('collect-current');
+  if (current) {
+    var s = collectTargetSong;
+    current.innerHTML = (s && s.name) ? ('<img src="' + (s.cover || s.img || '') + '" onerror="this.style.display=\'none\'" style="width:40px;height:40px;border-radius:6px;object-fit:cover;flex-shrink:0"><span>' + escapeHTML(s.name) + ' — ' + escapeHTML(s.artist || s.singer || '') + '</span>') : '';
+  }
+  var list = document.getElementById('collect-list');
+  if (!list) return;
+  var html = '';
+  // Show "我的喜欢" first, then other playlists
+  var fav = lxGetFavoritePlaylist();
+  if (fav) {
+    html += '<div class="collect-pl-item" onclick="addToLxPlaylist(\'lx_fav\', collectTargetSong); closeCollectModal();" style="cursor:pointer;padding:10px;border-radius:8px;margin:4px 0;background:rgba(255,122,144,0.08);display:flex;justify-content:space-between;align-items:center"><span>❤ ' + escapeHTML(fav.name) + '</span><span style="color:rgba(255,255,255,0.4);font-size:11px">' + fav.songs.length + ' 首</span></div>';
+  }
+  for (var i = 0; i < lxPlaylists.length; i++) {
+    var pl = lxPlaylists[i];
+    if (pl.id === 'lx_fav') continue;
+    html += '<div class="collect-pl-item" onclick="addToLxPlaylist(\'' + pl.id + '\', collectTargetSong); closeCollectModal();" style="cursor:pointer;padding:10px;border-radius:8px;margin:4px 0;background:rgba(255,255,255,0.04);display:flex;justify-content:space-between;align-items:center"><span>' + escapeHTML(pl.name) + '</span><span style="color:rgba(255,255,255,0.4);font-size:11px">' + pl.songs.length + ' 首</span></div>';
+  }
+  if (lxPlaylists.length <= 1) html += '<div style="color:rgba(255,255,255,0.35);padding:20px;text-align:center">暂无歌单，请先创建</div>';
+  list.innerHTML = html;
+}
+function removeLxPlaylist(plId) {
+  if (plId === 'lx_fav') { showToast('我的喜欢不可删除'); return; }
+  lxPlaylists = lxPlaylists.filter(function(p) { return p.id !== plId; });
+  saveLxPlaylists();
+}
+// Play an entire LX playlist (replace queue)
+function playLxPlaylist(plId) {
+  var pl = lxPlaylists.find(function(p) { return p.id === plId; });
+  if (!pl || !pl.songs.length) { showToast('歌单为空'); return; }
+  playQueue = pl.songs.map(function(s) {
+    return normalizeLxSearchSong({
+      name: s.name, singer: s.artist, id: s.songmid || s.id, songmid: s.songmid || s.id,
+      source: s.source, provider: s.source, img: s.cover, interval: s.interval,
+      albumName: s.album, albumId: s.albumId, types: s.types, _types: s._types,
+      hash: s.hash, copyrightId: s.copyrightId
+    });
+  });
+  currentIdx = 0;
+  safeRenderQueuePanel('lx-playlist-play', { scrollCurrent: miniQueueOpen });
+  safeShelfRebuild('lx-playlist-play');
+  playQueueAt(0);
+}
+// Play a single song from a playlist, then continue with remaining
+function playLxPlaylistSong(plId, idx) {
+  var pl = lxPlaylists.find(function(p) { return p.id === plId; });
+  if (!pl || !pl.songs.length || idx < 0 || idx >= pl.songs.length) return;
+  playQueue = pl.songs.map(function(s) {
+    return normalizeLxSearchSong({
+      name: s.name, singer: s.artist, id: s.songmid || s.id, songmid: s.songmid || s.id,
+      source: s.source, provider: s.source, img: s.cover, interval: s.interval,
+      albumName: s.album, albumId: s.albumId, types: s.types, _types: s._types,
+      hash: s.hash, copyrightId: s.copyrightId
+    });
+  });
+  currentIdx = idx;
+  safeRenderQueuePanel('lx-playlist-song', { scrollCurrent: miniQueueOpen });
+  safeShelfRebuild('lx-playlist-song');
+  playQueueAt(idx);
+}
+function updateLxLocalCounts() {
+  // Update sidebar if LX playlist tab is active
+  if (queueViewTab === 'playlists' && fx.lxSourceEnabled) renderLxSidebarPlaylists();
+  renderLxSidebar();
+}
 var uploadTipTimer = null, uploadTipAttempts = 0;
 var visualGuideActive = false, visualGuideStep = 0, visualGuideResizeBound = false;
 var visualGuideState = { bottomWasVisible: false, searchWasPeek: false, manual: false };
@@ -7786,6 +7904,50 @@ function saveLyricLayout() {
     }));
   } catch (e) {}
 }
+// --- 播放队列持久化 ---
+var QUEUE_STORE_KEY = 'mineradio-queue-state-v1';
+function saveQueueState() {
+  try {
+    if (!playQueue.length) { localStorage.removeItem(QUEUE_STORE_KEY); return; }
+    var state = {
+      queue: playQueue.map(function(s) { return Object.assign({}, s); }),
+      idx: currentIdx,
+      time: audio && isFinite(audio.currentTime) ? audio.currentTime : 0
+    };
+    localStorage.setItem(QUEUE_STORE_KEY, JSON.stringify(state));
+  } catch(e) {}
+}
+function restoreQueueState() {
+  try {
+    var raw = localStorage.getItem(QUEUE_STORE_KEY);
+    if (!raw) return false;
+    var state = JSON.parse(raw);
+    if (!state.queue || !state.queue.length) return false;
+    playQueue = state.queue.map(function(s) { return hydrateCustomCover(s); });
+    currentIdx = Math.max(0, Math.min(state.idx || 0, playQueue.length - 1));
+    // Defer resume position until audio element is ready
+    if (state.time > 0) {
+      var savedTime = state.time;
+      var savedIdx = currentIdx;
+      var checkAudio = function() {
+        if (audio && audio.readyState >= 1) {
+          audio.currentTime = savedTime;
+        } else {
+          setTimeout(checkAudio, 500);
+        }
+      };
+      setTimeout(checkAudio, 1000);
+    }
+    safeRenderQueuePanel('restore-queue', { scrollCurrent: miniQueueOpen });
+    safeShelfRebuild('restore-queue');
+    return true;
+  } catch(e) { return false; }
+}
+// 在 beforeunload/pagehide 中保存队列 + 定时保存
+window.addEventListener('beforeunload', saveQueueState);
+window.addEventListener('pagehide', saveQueueState);
+setInterval(function() { if (playQueue.length > 0) saveQueueState(); }, 10000);
+
 function normalizeHexColor(value, fallback) {
   var hex = String(value || '').trim();
   if (/^#[0-9a-f]{3}$/i.test(hex)) {
@@ -17023,13 +17185,19 @@ function deleteCustomLyricForCurrent() {
   setCustomLyricStatus('已删除，恢复原歌词', 'good');
   showToast('已恢复原歌词');
 }
+function isLxSourceSong(song) {
+  var src = (song && (song.provider || song.source || '')).toLowerCase();
+  return src === 'kw' || src === 'kg' || src === 'tx' || src === 'wy' || src === 'mg';
+}
 function isCloudSong(song) {
   if (!song || !song.id) return false;
+  if (isLxSourceSong(song)) return false; // LX songs use local storage
   if (song.provider === 'qq' || song.source === 'qq' || song.type === 'qq') return false;
   if (song.type === 'local' || song.type === 'podcast' || song.source === 'podcast') return false;
   return !song.provider || song.provider === 'netease' || song.source === 'netease' || song.type === 'song';
 }
 function isSongLiked(song) {
+  if (isLxSourceSong(song)) return isLxSongLiked(song);
   return !!(song && song.id && likedSongMap[String(song.id)]);
 }
 function ensureLoggedInForAction() {
@@ -17113,6 +17281,31 @@ function refreshSearchResultActionStates() {
   });
 }
 async function toggleLikeSong(song) {
+  // LX 模式：加入/移出"我的喜欢"歌单
+  if (isLxSourceSong(song)) {
+    var lxKey = lxSongKey(song);
+    if (!lxKey) return;
+    var fav = lxGetFavoritePlaylist();
+    if (!fav) return;
+    var idx = fav.songs.findIndex(function(s){ return lxSongKey(s) === lxKey; });
+    if (idx >= 0) {
+      fav.songs.splice(idx, 1);
+      saveLxPlaylists();
+      updateLikeButtons(song);
+      safeRenderQueuePanel('lx-like-remove', { scrollCurrent: miniQueueOpen });
+      refreshSearchResultActionStates();
+      showToast('已取消红心');
+    } else {
+      fav.songs.push(lxStoreSong(song));
+      saveLxPlaylists();
+      updateLikeButtons(song);
+      safeRenderQueuePanel('lx-like-add', { scrollCurrent: miniQueueOpen });
+      refreshSearchResultActionStates();
+      showToast('已加入红心喜欢');
+    }
+    updateLxLocalCounts();
+    return;
+  }
   if (!isCloudSong(song)) {
     showToast(songProviderKey(song) === 'qq' ? 'QQ 音乐红心同步待登录接口接入' : '本地文件暂不支持红心同步');
     return;
@@ -17146,6 +17339,14 @@ function toggleLikeSearchResult(i) { if (playlist[i]) toggleLikeSong(playlist[i]
 function toggleLikeQueueIndex(i) { if (playQueue[i]) toggleLikeSong(playQueue[i]); }
 function toggleLikeDetailSong(song) { toggleLikeSong(song); }
 function openCollectModal(song) {
+  // LX 模式：本地歌单
+  if (isLxSourceSong(song)) {
+    if (!song || !lxSongKey(song)) return;
+    collectTargetSong = song;
+    renderLxCollectModal();
+    openGsapModal(document.getElementById('collect-modal'));
+    return;
+  }
   if (!isCloudSong(song)) {
     showToast(songProviderKey(song) === 'qq' ? 'QQ 音乐收藏到歌单待登录接口接入' : '本地文件暂不支持收藏到网易云歌单');
     return;
@@ -17205,10 +17406,18 @@ function setCollectBusyPid(pid, busy) {
   });
 }
 async function createPlaylistFromCollect() {
-  if (!ensureLoggedInForAction()) return;
   var input = document.getElementById('collect-new-name');
   var name = input ? input.value.trim() : '';
   if (!name) { showToast('先输入歌单名称'); return; }
+  // LX 模式：本地歌单
+  if (collectTargetSong && isLxSourceSong(collectTargetSong)) {
+    var pl = createLxPlaylist(name);
+    if (pl && collectTargetSong) addToLxPlaylist(pl.id, collectTargetSong);
+    if (input) input.value = '';
+    renderLxCollectModal();
+    return;
+  }
+  if (!ensureLoggedInForAction()) return;
   try {
     var r = await apiJson('/api/playlist/create?name=' + encodeURIComponent(name));
     if (r && r.error) throw new Error(r.error);
@@ -19502,18 +19711,90 @@ function scrollPlaylistPanelToCurrent() {
 function switchPlaylistTab(tab) {
   tab = tab === 'podcasts' ? 'podcasts' : (tab === 'playlists' ? 'playlists' : 'queue');
   queueViewTab = tab;
-  document.getElementById('tab-queue').classList.toggle('active', tab === 'queue');
-  document.getElementById('tab-pl').classList.toggle('active', tab === 'playlists');
+  // In LX mode, hide podcast tab and rename playlist tab
   var podcastTab = document.getElementById('tab-podcast');
+  var plTab = document.getElementById('tab-pl');
+  if (fx.lxSourceEnabled) {
+    if (podcastTab) podcastTab.style.display = 'none';
+    if (plTab) plTab.textContent = 'LX歌单';
+    document.getElementById('podcast-pane').style.display = 'none';
+  } else {
+    if (podcastTab) podcastTab.style.display = '';
+    if (plTab) plTab.textContent = '我的歌单';
+  }
+  document.getElementById('tab-queue').classList.toggle('active', tab === 'queue');
+  if (plTab) plTab.classList.toggle('active', tab === 'playlists');
   if (podcastTab) podcastTab.classList.toggle('active', tab === 'podcasts');
   document.getElementById('queue-pane').style.display = tab === 'queue' ? '' : 'none';
   document.getElementById('pl-pane').style.display = tab === 'playlists' ? '' : 'none';
   var podcastPane = document.getElementById('podcast-pane');
-  if (podcastPane) podcastPane.style.display = tab === 'podcasts' ? '' : 'none';
-  if (tab === 'playlists' || tab === 'podcasts') refreshUserPlaylists();
+  if (podcastPane) podcastPane.style.display = (tab === 'podcasts' && !fx.lxSourceEnabled) ? '' : 'none';
+  if (tab === 'playlists') { if (fx.lxSourceEnabled) renderLxSidebarPlaylists(); else refreshUserPlaylists(); }
+  if (tab === 'podcasts' && !fx.lxSourceEnabled) refreshUserPlaylists();
   if (tab === 'queue') animateVisiblePanelList(document.getElementById('queue-list'), '.queue-item', document.getElementById('playlist-panel'), '.queue-item.now');
   if (tab === 'playlists') animateVisiblePanelList(document.getElementById('pl-list'), '.pl-card', document.getElementById('playlist-panel'));
   if (tab === 'podcasts') animateVisiblePanelList(document.getElementById('podcast-list'), '.pl-card', document.getElementById('playlist-panel'));
+}
+// --- 在左侧面板渲染 LX 歌单 ---
+function renderLxSidebar() {
+  // Update tab text and visibility
+  var plTab = document.getElementById('tab-pl');
+  var podcastTab = document.getElementById('tab-podcast');
+  if (fx.lxSourceEnabled) {
+    if (plTab) plTab.textContent = 'LX歌单';
+    if (podcastTab) podcastTab.style.display = 'none';
+    document.getElementById('podcast-pane').style.display = 'none';
+  } else {
+    if (plTab) plTab.textContent = '我的歌单';
+    if (podcastTab) podcastTab.style.display = '';
+  }
+  // Re-render if playlists tab is active
+  if (queueViewTab === 'playlists' && fx.lxSourceEnabled) renderLxSidebarPlaylists();
+}
+// Track which playlist is expanded in sidebar
+var lxSidebarExpanded = null;
+function renderLxSidebarPlaylists() {
+  var plList = document.getElementById('pl-list');
+  if (!plList) return;
+  var html = '';
+  for (var i = 0; i < lxPlaylists.length; i++) {
+    var pl = lxPlaylists[i];
+    var isFav = pl.id === 'lx_fav';
+    var expanded = lxSidebarExpanded === pl.id;
+    html += '<div class="pl-card" style="margin:6px 0;border-radius:10px;background:' + (isFav ? 'rgba(255,122,144,0.06)' : 'rgba(255,255,255,0.03)') + ';border:1px solid ' + (isFav ? 'rgba(255,122,144,0.18)' : 'rgba(255,255,255,0.06)') + '">';
+    // Header (click to toggle expand)
+    html += '<div style="cursor:pointer;padding:12px;display:flex;align-items:center;gap:10px" onclick="toggleLxSidebarExpand(\'' + pl.id + '\')">' +
+      '<div style="font-size:' + (isFav ? '18' : '14') + 'px">' + (isFav ? '❤' : '📋') + '</div>' +
+      '<div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escapeHTML(pl.name) + '</div>' +
+      '<div style="font-size:11px;color:rgba(255,255,255,0.4);margin-top:2px">' + pl.songs.length + ' 首' + (expanded ? ' ▲' : ' ▼') + '</div></div></div>';
+    // Expanded: show songs + play all button
+    if (expanded) {
+      html += '<div style="padding:0 12px 8px">';
+      html += '<button style="width:100%;padding:6px;margin-bottom:6px;border-radius:6px;border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.06);color:#fff;cursor:pointer;font-size:11px" onclick="event.stopPropagation();playLxPlaylist(\'' + pl.id + '\')">▶ 播放全部</button>';
+      if (!pl.songs.length) {
+        html += '<div style="color:rgba(255,255,255,0.3);text-align:center;padding:8px;font-size:11px">暂无歌曲</div>';
+      } else {
+        for (var j = 0; j < pl.songs.length; j++) {
+          var s = pl.songs[j];
+          html += '<div style="display:flex;align-items:center;gap:8px;padding:5px 8px;cursor:pointer;border-radius:4px;font-size:11px" onclick="event.stopPropagation();playLxPlaylistSong(\'' + pl.id + '\',' + j + ')" onmouseenter="this.style.background=\'rgba(255,255,255,0.05)\'" onmouseleave="this.style.background=\'transparent\'">' +
+            '<span style="color:rgba(255,255,255,0.35);min-width:18px;text-align:right">' + (j + 1) + '</span>' +
+            '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escapeHTML(s.name || '未知歌曲') + '</span>' +
+            '<span style="color:rgba(255,255,255,0.3);font-size:10px">' + escapeHTML(s.artist || '') + '</span></div>';
+        }
+      }
+      html += '</div>';
+    }
+    html += '</div>';
+  }
+  if (!lxPlaylists.length) html = '<div style="color:rgba(255,255,255,0.3);padding:24px;text-align:center">暂无歌单<br><span style="font-size:11px">播放 LX 歌曲后点击收藏按钮创建</span></div>';
+  plList.innerHTML = html;
+  // Animate
+  animateVisiblePanelList(plList, '.pl-card', document.getElementById('playlist-panel'));
+}
+function toggleLxSidebarExpand(plId) {
+  if (lxSidebarExpanded === plId) lxSidebarExpanded = null;
+  else lxSidebarExpanded = plId;
+  renderLxSidebarPlaylists();
 }
 function setMiniQueueOpen(open) {
   miniQueueOpen = !!open;
@@ -22918,6 +23199,7 @@ function updateLxUI() {
           text.textContent = '默认模式 · 网易云 / QQ 音乐';
         }
       }
+      updateLxLocalCounts();
       updateSearchModeTabs();
     });
   });
@@ -24559,6 +24841,8 @@ function runLoginGuideParticles(done) {
   loginGuideRaf = requestAnimationFrame(draw);
 }
 function maybeRunStartupLoginGuide(source) {
+  // Disabled: no longer auto-popup login on startup
+  return;
   if (startupLoginGuideShown || loginGuideAnimating) return;
   if (visualGuideActive) return;
   if (document.body.classList.contains('splash-active')) return;
@@ -27145,6 +27429,7 @@ applyDesktopLyricsState(false);
 applyWallpaperModeState(false);
 setShelfMode(fx.shelf);
 applyStartupStarfieldPreset();
+restoreQueueState();
 applyPlaylistPanelPinState(false);
 if (fx.floatLayer) createFloatLayer();
 if (fx.particleLyrics) createLyricsParticles();
