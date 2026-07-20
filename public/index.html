@@ -7909,12 +7909,10 @@ var QUEUE_STORE_KEY = 'mineradio-queue-state-v1';
 function saveQueueState() {
   try {
     if (!playQueue.length) { localStorage.removeItem(QUEUE_STORE_KEY); return; }
-    var state = {
+    localStorage.setItem(QUEUE_STORE_KEY, JSON.stringify({
       queue: playQueue.map(function(s) { return Object.assign({}, s); }),
-      idx: currentIdx,
-      time: audio && isFinite(audio.currentTime) ? audio.currentTime : 0
-    };
-    localStorage.setItem(QUEUE_STORE_KEY, JSON.stringify(state));
+      idx: currentIdx
+    }));
   } catch(e) {}
 }
 function restoreQueueState() {
@@ -7925,19 +7923,6 @@ function restoreQueueState() {
     if (!state.queue || !state.queue.length) return false;
     playQueue = state.queue.map(function(s) { return hydrateCustomCover(s); });
     currentIdx = Math.max(0, Math.min(state.idx || 0, playQueue.length - 1));
-    // Defer resume position until audio element is ready
-    if (state.time > 0) {
-      var savedTime = state.time;
-      var savedIdx = currentIdx;
-      var checkAudio = function() {
-        if (audio && audio.readyState >= 1) {
-          audio.currentTime = savedTime;
-        } else {
-          setTimeout(checkAudio, 500);
-        }
-      };
-      setTimeout(checkAudio, 1000);
-    }
     safeRenderQueuePanel('restore-queue', { scrollCurrent: miniQueueOpen });
     safeShelfRebuild('restore-queue');
     return true;
