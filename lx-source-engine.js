@@ -7,6 +7,21 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const zlib = require('zlib');
+const tunnel = require('tunnel');
+
+// Proxy configuration matching lx-music-desktop's preload.js getRequestAgent
+// Only enabled when LX_PROXY_ENABLED=1 env var is set
+var LX_PROXY_HOST = process.env.LX_PROXY_HOST || '127.0.0.1';
+var LX_PROXY_PORT = parseInt(process.env.LX_PROXY_PORT || '10808', 10);
+var LX_PROXY_ENABLED = process.env.LX_PROXY_ENABLED === '1';
+function getRequestAgent(url) {
+  if (!LX_PROXY_ENABLED || !LX_PROXY_HOST) return undefined;
+  var isHttps = /^https:/i.test(url);
+  try {
+    if (isHttps) return tunnel.httpsOverHttp({ proxy: { host: LX_PROXY_HOST, port: LX_PROXY_PORT } });
+    else return tunnel.httpOverHttp({ proxy: { host: LX_PROXY_HOST, port: LX_PROXY_PORT } });
+  } catch(e) { return undefined; }
+}
 
 const SOURCES_DIR = path.join(__dirname, '.lx-sources');
 const INDEX_FILE = path.join(SOURCES_DIR, 'index.json');
@@ -60,7 +75,7 @@ function parseScriptInfo(script) {
 var lxStore = {
   handlers: {},
   sources: {},
-  version: '1.0.0',
+  version: '2.0.0',
   env: 'desktop',
 };
 
@@ -70,7 +85,7 @@ function createLxAPI() {
     version: lxStore.version,
     env: lxStore.env,
     currentScriptInfo: null,
-    request: function(url, options, callback) {
+    request: function lxRequest(url, options, callback) {
       if (typeof options === 'function') { callback = options; options = {}; }
       options = options || {};
       var method = (options.method || 'GET').toUpperCase();
@@ -88,6 +103,7 @@ function createLxAPI() {
         port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
         path: parsed.pathname + parsed.search,
         headers: reqHeaders,
+        agent: getRequestAgent(url),
       };
       var timedOut = false;
       // Explicit setTimeout-based timeout (more reliable than socket timeout alone)
@@ -100,22 +116,27 @@ function createLxAPI() {
       }, reqTimeout);
 
       var req = mod.request(reqOptions, function(res) {
+        // Handle redirect — needle follows automatically, we must do it manually
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          clearTimeout(timer);
+          var redirectUrl = res.headers.location;
+          if (!/^https?:\/\//i.test(redirectUrl)) {
+            redirectUrl = parsed.protocol + '//' + parsed.host + redirectUrl;
+          }
+          lxRequest(redirectUrl, options, callback);
+          return;
+        }
         var chunks = [];
         res.on('data', function(c) { chunks.push(c); });
         res.on('end', function() {
           if (timedOut) return;
           clearTimeout(timer);
-          var rawBody = Buffer.concat(chunks);
-          var body = rawBody;
-          // Auto-parse JSON (lx-music-desktop's needle does this automatically)
+          // Matching needle behavior: always convert raw to string first, then try JSON parse
+          var rawString = Buffer.concat(chunks).toString('utf8');
+          var body = rawString;
           try {
-            var contentType = (res.headers['content-type'] || '').toLowerCase();
-            if (contentType.indexOf('json') !== -1 || (rawBody.length > 0 && rawBody[0] === 0x7b)) {
-              body = JSON.parse(rawBody.toString('utf8'));
-            }
-          } catch (e) {
-            body = rawBody.toString('utf8');
-          }
+            body = JSON.parse(rawString);
+          } catch (e) {}
           callback(null, {
             statusCode: res.statusCode,
             headers: res.headers,
@@ -149,14 +170,20 @@ function createLxAPI() {
     },
     utils: {
       crypto: {
-        aesEncrypt: function(buffer, mode, key, iv) { return Buffer.from(''); },
-        rsaEncrypt: function(buffer, key) { return Buffer.from(''); },
+        aesEncrypt: function(buffer, mode, key, iv) {
+          var cipher = crypto.createCipheriv(mode, key, iv || '');
+          return Buffer.concat([cipher.update(buffer), cipher.final()]);
+        },
+        rsaEncrypt: function(buffer, key) {
+          buffer = Buffer.concat([Buffer.alloc(128 - buffer.length), buffer]);
+          return crypto.publicEncrypt({ key: key, padding: crypto.constants.RSA_NO_PADDING }, buffer);
+        },
         randomBytes: function(size) { return crypto.randomBytes(size); },
         md5: function(str) { return crypto.createHash('md5').update(str).digest('hex'); },
       },
       buffer: {
         from: function() { return Buffer.from.apply(Buffer, arguments); },
-        bufToString: function(buf, format) { return buf.toString(format || 'utf8'); },
+        bufToString: function(buf, format) { return Buffer.from(buf, 'binary').toString(format || 'utf8'); },
       },
       zlib: {
         inflate: function(buf) { return new Promise(function(resolve, reject) { zlib.inflate(buf, function(err, r) { err ? reject(err) : resolve(r); }); }); },
@@ -175,11 +202,22 @@ function runScriptInVM(scriptContent, scriptInfo) {
     lxStore.inited = false;
 
     var lxAPI = createLxAPI();
+    // Include rawScript & homepage — obfuscated sources (e.g. lx-dujia.js) need these
+    scriptInfo.rawScript = scriptContent;
+    scriptInfo.homepage = scriptInfo.homepage || '';
     lxAPI.currentScriptInfo = scriptInfo;
 
+    // Catch unhandled rejections like lx-music-desktop preload.js does
+    var onRejection = function(reason) {
+      console.error('[lx-engine] Unhandled rejection in source:', (reason && reason.message) || reason);
+    };
+    var rejectionTimer = setTimeout(function() {
+      process.removeListener('unhandledRejection', onRejection);
+    }, 15000);
+
     var sandbox = {
-      globalThis: { lx: lxAPI },
       console: console,
+      process: { on: function() {}, env: {} },
       setTimeout: setTimeout,
       clearTimeout: clearTimeout,
       setInterval: setInterval,
@@ -203,8 +241,35 @@ function runScriptInVM(scriptContent, scriptInfo) {
       encodeURIComponent: encodeURIComponent,
       decodeURIComponent: decodeURIComponent,
     };
+    // lx on sandbox BEFORE createContext — so it's part of the global object
+    // Browser globals (before createContext so they're part of the global)
+    sandbox.atob = function(str) { return Buffer.from(String(str), 'base64').toString('binary'); };
+    sandbox.btoa = function(str) { return Buffer.from(String(str), 'binary').toString('base64'); };
+    sandbox.TextEncoder = TextEncoder;
+    sandbox.TextDecoder = TextDecoder;
+    sandbox.navigator = { userAgent: 'lx-music-desktop/' + lxStore.version, appName: 'Netscape', platform: 'Win32' };
+    sandbox.location = { href: 'http://127.0.0.1/', protocol: 'http:', host: '127.0.0.1', hostname: '127.0.0.1' };
+    sandbox.document = { createElement: function() { return { style: {}, appendChild: function(){} }; }, body: { appendChild: function(){} }, head: { appendChild: function(){} }, documentElement: {} };
+    var nodeCrypto = crypto;
+    sandbox.crypto = { getRandomValues: function(arr) { var buf = nodeCrypto.randomBytes(arr.length); for (var i=0;i<arr.length;i++) arr[i]=buf[i]; return arr; }, randomUUID: function() { return nodeCrypto.randomUUID(); }, subtle: {} };
+    sandbox.lx = lxAPI;
 
     var ctx = vm.createContext(sandbox);
+    ctx.globalThis = ctx;
+    ctx.self = ctx;
+    ctx.window = ctx;  // many obfuscated scripts access window.String etc.
+    ctx.performance = { now: function() { return Date.now(); } };
+    ctx.XMLHttpRequest = function() { this.open=function(){}; this.send=function(){}; this.setRequestHeader=function(){}; };
+    // eval/Function for obfuscated code deobfuscation
+    ctx.eval = function(code) { return vm.runInContext(code, ctx, { timeout: 5000 }); };
+    ctx.Function = function() {
+      var args = Array.prototype.slice.call(arguments);
+      var body = args.pop() || '';
+      var params = args.join(',');
+      return vm.runInContext('(function(' + params + '){' + body + '})', ctx, { timeout: 5000 });
+    };
+    // Register unhandledRejection handler BEFORE running script (matching lx-music-desktop preload.js)
+    process.on('unhandledRejection', onRejection);
     try {
       var script = new vm.Script(scriptContent, { filename: 'lx-source-script.js' });
       script.runInContext(ctx, { timeout: 10000 });
@@ -215,14 +280,26 @@ function runScriptInVM(scriptContent, scriptInfo) {
         waited += 100;
         if (lxStore.inited) {
           clearInterval(iv);
+          clearTimeout(rejectionTimer);
+          process.removeListener('unhandledRejection', onRejection);
           resolve({ sources: lxStore.sources, api: lxAPI });
         } else if (waited >= 5000) {
           clearInterval(iv);
+          clearTimeout(rejectionTimer);
+          process.removeListener('unhandledRejection', onRejection);
           reject(new Error('Source script timed out without calling lx.send("inited")'));
         }
       }, 100);
     } catch (err) {
-      reject(err);
+      clearTimeout(rejectionTimer);
+      process.removeListener('unhandledRejection', onRejection);
+      // If inited was called before the error, still resolve (matching lx-music-desktop behavior)
+      if (lxStore.inited) {
+        console.error('[lx-engine] Script error after init:', err.message);
+        resolve({ sources: lxStore.sources, api: lxAPI });
+      } else {
+        reject(err);
+      }
     }
   });
 }
