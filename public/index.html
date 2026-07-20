@@ -1190,6 +1190,25 @@ body.desktop-shell.diy-mode #bottom-bar.stage-mode{left:50%;width:min(1080px,cal
 .fx-slider.dev-locked{opacity:.48;filter:saturate(.72)}
 .fx-slider.dev-locked input{cursor:not-allowed}
 
+/* --- LX 音乐来源 --- */
+.lx-source-list{display:flex;flex-direction:column;gap:6px;margin-top:6px}
+.lx-source-item{display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border-radius:9px;border:1px solid rgba(255,255,255,.06);background:rgba(255,255,255,.022);font-size:11px;color:rgba(255,255,255,.68);gap:8px}
+.lx-source-item .src-info{min-width:0;flex:1;overflow:hidden}
+.lx-source-item .src-name{font-weight:600;font-size:11.5px;color:rgba(255,255,255,.88);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lx-source-item .src-meta{color:rgba(255,255,255,.44);margin-top:2px;font-size:10px}
+.lx-source-item .src-platforms{display:flex;gap:3px;flex-wrap:wrap}
+.lx-source-item .src-platform{display:inline-block;padding:1.5px 5px;border-radius:4px;background:rgba(255,255,255,.08);font-size:9.5px;color:rgba(255,255,255,.48);text-transform:uppercase}
+.lx-source-item .src-actions{display:flex;gap:4px;flex-shrink:0}
+.lx-source-item .src-act-btn{padding:4px 7px;border-radius:5px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.024);color:rgba(255,255,255,.55);font-size:10px;cursor:pointer;transition:all .2s}
+.lx-source-item .src-act-btn:hover{background:rgba(255,255,255,.06);color:rgba(255,255,255,.82)}
+.lx-source-item .src-act-btn.danger:hover{background:rgba(255,80,60,.18);color:#ff7060;border-color:rgba(255,80,60,.28)}
+.lx-source-actions{display:flex;gap:6px;margin-bottom:4px}
+.lx-status{display:flex;align-items:center;gap:6px;margin-top:8px;font-size:10.5px;color:rgba(255,255,255,.45)}
+.lx-status-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.lx-status-dot.on{background:#4ade80;box-shadow:0 0 6px rgba(74,222,128,.4)}
+.lx-status-dot.off{background:rgba(255,255,255,.18)}
+.lx-status-dot.err{background:#f87171;box-shadow:0 0 6px rgba(248,113,113,.4)}
+
 /* --- 三态分段 --- */
 .fx-seg{display:flex;border-radius:11px;border:1px solid rgba(255,255,255,.08);overflow:hidden;background:rgba(255,255,255,.026);margin-bottom:10px}
 .fx-seg button{flex:1;padding:8px 4px;background:none;border:none;color:rgba(255,255,255,.55);cursor:pointer;font-size:11.5px;font-family:inherit;transition:all .2s;letter-spacing:.4px;border-right:1px solid rgba(255,255,255,.05)}
@@ -1911,6 +1930,7 @@ html.control-glass-svg-ok #visual-guide-btn:hover{
       <button id="search-mode-netease" type="button" onclick="setSearchMode('netease')" aria-selected="false">NE</button>
       <button id="search-mode-qq" type="button" onclick="setSearchMode('qq')" aria-selected="false">QQ</button>
       <button id="search-mode-podcast" type="button" onclick="setSearchMode('podcast')" aria-selected="false">Podcast</button>
+      <span id="lx-search-mode-btns" style="display:none"></span>
     </div>
     <div id="search-results"></div>
   </div>
@@ -2221,6 +2241,47 @@ html.control-glass-svg-ok #visual-guide-btn:hover{
       <div class="fx-seg" id="cam-seg">
         <button data-cam="off" class="active">关闭</button>
         <button data-cam="gesture">手势触碰</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="fx-fold" id="fx-lx-source-fold">
+    <div class="fx-fold-head" onclick="document.getElementById('fx-lx-source-fold').classList.toggle('open')">
+      <span class="fx-fold-title"><strong>音乐来源</strong><small>默认 / LX 源管理</small></span><span class="arrow">▶</span>
+    </div>
+    <div class="fx-fold-body">
+      <div class="fx-section-label">获取模式</div>
+      <div class="fx-seg" id="lx-mode-seg">
+        <button data-lx-mode="default" class="active">默认</button>
+        <button data-lx-mode="lx">LX 源</button>
+      </div>
+
+      <div id="lx-active-source-section" style="display:none">
+        <div class="fx-section-label">活跃源</div>
+        <div class="fx-seg" id="lx-active-source-seg">
+        </div>
+      </div>
+
+      <div class="fx-section-label">源管理</div>
+      <div class="fx-source-actions" id="lx-source-actions">
+        <button class="fx-mini-btn" id="lx-import-btn" onclick="showLxImportInput()">+ 导入在线源</button>
+        <button class="fx-mini-btn" id="lx-import-local-btn" onclick="showLxLocalImportInput()">+ 导入本地源</button>
+      </div>
+      <div id="lx-import-row" style="display:none;gap:5px;margin-bottom:6px">
+        <input id="lx-import-url" type="text" placeholder="输入 LX 源脚本 URL..." style="flex:1;padding:5px 8px;border-radius:7px;border:1px solid rgba(255,255,255,.12);background:rgba(0,0,0,.25);color:#fff;font-size:11px;font-family:inherit;outline:none">
+        <button class="fx-mini-btn" id="lx-import-confirm" onclick="doLxImport()">确认</button>
+        <button class="fx-mini-btn" id="lx-import-cancel" onclick="hideLxImportInput()">取消</button>
+      </div>
+      <div id="lx-import-local-row" style="display:none;gap:5px;margin-bottom:6px">
+        <input id="lx-import-local-path" type="text" placeholder="输入本地 .js 源文件路径..." style="flex:1;padding:5px 8px;border-radius:7px;border:1px solid rgba(255,255,255,.12);background:rgba(0,0,0,.25);color:#fff;font-size:11px;font-family:inherit;outline:none">
+        <button class="fx-mini-btn" id="lx-import-local-confirm" onclick="doLxLocalImport()">确认</button>
+        <button class="fx-mini-btn" id="lx-import-local-cancel" onclick="hideLxLocalImportInput()">取消</button>
+      </div>
+      <div id="lx-source-list" class="lx-source-list"></div>
+
+      <div id="lx-status-bar" class="lx-status">
+        <span id="lx-status-dot" class="lx-status-dot off"></span>
+        <span id="lx-status-text">未启用 LX 源</span>
       </div>
     </div>
   </div>
@@ -3265,6 +3326,8 @@ var fxDefaults = {
   performanceQuality: 'high',
   liveBackgroundKeep: false,
   cam: 'off',
+  lxSourceEnabled: false,
+  lxActiveSourceId: null,
 };
 var PACKAGED_DEFAULT_USER_FX_ARCHIVE_NAME = '默认测试';
 var PACKAGED_DEFAULT_USER_FX_ARCHIVE_EXPORTED_AT = 1782276031784;
@@ -7625,6 +7688,8 @@ function readSavedLyricLayout() {
       shelfOpacity: clampRange(raw.shelfOpacity == null ? fxDefaults.shelfOpacity : Number(raw.shelfOpacity), 0.25, 1),
       shelfBgOpacity: clampRange(raw.shelfBgOpacity == null ? fxDefaults.shelfBgOpacity : Number(raw.shelfBgOpacity), 0.25, 0.98),
       shelfAccentColor: normalizeHexColor(raw.shelfAccentColor || fxDefaults.shelfAccentColor, fxDefaults.shelfAccentColor),
+      lxSourceEnabled: !!raw.lxSourceEnabled,
+      lxActiveSourceId: typeof raw.lxActiveSourceId === 'string' ? raw.lxActiveSourceId : null,
       cam: /^(off|gesture)$/.test(String(raw.cam || '')) ? raw.cam : fxDefaults.cam
     };
   } catch (e) {
@@ -7715,6 +7780,8 @@ function saveLyricLayout() {
       shelfOpacity: clampRange(fx.shelfOpacity == null ? fxDefaults.shelfOpacity : Number(fx.shelfOpacity), 0.25, 1),
       shelfBgOpacity: clampRange(fx.shelfBgOpacity == null ? fxDefaults.shelfBgOpacity : Number(fx.shelfBgOpacity), 0.25, 0.98),
       shelfAccentColor: normalizeHexColor(fx.shelfAccentColor || fxDefaults.shelfAccentColor, fxDefaults.shelfAccentColor),
+      lxSourceEnabled: !!fx.lxSourceEnabled,
+      lxActiveSourceId: fx.lxActiveSourceId || null,
       cam: /^(off|gesture)$/.test(String(fx.cam || '')) ? fx.cam : fxDefaults.cam
     }));
   } catch (e) {}
@@ -10313,9 +10380,26 @@ async function fetchBeatPrefetchAudioUrl(song) {
   if (!isQQ && requestedQuality === 'jymaster' && !hasProviderSvip('netease', loginStatus)) requestedQuality = 'hires';
   if (isQQ && qqPlaybackQualityCeiling && (requestedQuality === 'jymaster' || requestedQuality === 'hires' || requestedQuality === 'lossless')) requestedQuality = qqPlaybackQualityCeiling;
   var qualityParam = '&quality=' + encodeURIComponent(requestedQuality);
-  var data = isQQ
-    ? await apiJson('/api/qq/song/url?mid=' + encodeURIComponent(song.mid || song.songmid || song.id || '') + '&mediaMid=' + encodeURIComponent(song.mediaMid || song.media_mid || '') + qualityParam)
-    : await apiJson('/api/song/url?id=' + encodeURIComponent(song.id) + qualityParam);
+  var data;
+  if (fx.lxSourceEnabled) {
+    // LX engine expects raw source codes: wy, tx, kw, kg, mg (NOT netease/qq)
+    var lxSrc = song.provider || song.source || 'wy';
+    var lxId = song.songmid || song.mid || song.id || '';
+    var lxUrl = '/api/lx/song/url?source=' + encodeURIComponent(lxSrc) + '&songId=' + encodeURIComponent(lxId) + qualityParam;
+    // For kg, pass the file hash; for mg, pass the copyrightId
+    var lxHash = song.hash || song.copyrightId || '';
+    if (lxHash && lxHash !== lxId) lxUrl += '&hash=' + encodeURIComponent(lxHash);
+    if (song.copyrightId && song.copyrightId !== lxHash) lxUrl += '&copyrightId=' + encodeURIComponent(song.copyrightId);
+    // Pass rich metadata for source scripts that need it (e.g. juhe)
+    if (song.name) lxUrl += '&name=' + encodeURIComponent(song.name);
+    if (song.artist || song.singer) lxUrl += '&singer=' + encodeURIComponent(song.artist || song.singer || '');
+    if (song.interval) lxUrl += '&interval=' + encodeURIComponent(song.interval);
+    data = await apiJson(lxUrl, { timeoutMs: 15000 });
+  } else if (isQQ) {
+    data = await apiJson('/api/qq/song/url?mid=' + encodeURIComponent(song.mid || song.songmid || song.id || '') + '&mediaMid=' + encodeURIComponent(song.mediaMid || song.media_mid || '') + qualityParam);
+  } else {
+    data = await apiJson('/api/song/url?id=' + encodeURIComponent(song.id) + qualityParam);
+  }
   if (!data || !data.url || data.trial) return null;
   return '/api/audio?url=' + encodeURIComponent(data.url);
 }
@@ -10397,7 +10481,19 @@ async function analyzeAudioBeats(audioUrl, durationSec, token, options) {
     await yieldToIdle(beatAnalysisYieldMs(options, 140, 760));
     if (token !== beatMapToken) { hideBeatChip(); beatMapBusy = false; return null; }
     showBeatChip('正在分析节奏…');
-    var resp = await fetch(audioUrl);
+    // Add timeout to prevent fetch from hanging indefinitely
+    var beatAc = new AbortController();
+    var beatFetchTimer = setTimeout(function() { beatAc.abort(); }, 25000);
+    var resp;
+    try {
+      resp = await fetch(audioUrl, { signal: beatAc.signal });
+    } catch (fetchErr) {
+      clearTimeout(beatFetchTimer);
+      if (fetchErr.name === 'AbortError') { console.log('[beat] fetch timeout'); }
+      else { console.warn('[beat] fetch error:', fetchErr.message); }
+      hideBeatChip(); beatMapBusy = false; return null;
+    }
+    clearTimeout(beatFetchTimer);
     if (token !== beatMapToken) { hideBeatChip(); return null; }
     var ab = await resp.arrayBuffer();
     if (token !== beatMapToken) { hideBeatChip(); return null; }
@@ -12491,6 +12587,8 @@ function loadCoverFromUrl(directUrl, opts) {
     applyCoverCanvas(cv, proxiedUrl || directUrl, Object.assign({}, opts, { coverKey: directUrl || proxiedUrl || '', coverSourceKind: 'url', coverSource: directUrl }));
   };
   img.onerror = function() {
+    // Fallback: load raw URL directly. Use cache-bust to avoid using
+    // browser-cached non-CORS version (from album-bg background load).
     var img2 = new Image(); img2.crossOrigin = 'anonymous'; img2.decoding = 'async';
     img2.onload = function() {
       if (!coverApplyStillCurrent(opts)) return;
@@ -12506,7 +12604,7 @@ function loadCoverFromUrl(directUrl, opts) {
       resetFloatColorsToIdle();
       setControlCoverSrc('');
     };
-    img2.src = directUrl;
+    img2.src = directUrl + (directUrl.indexOf('?') >= 0 ? '&' : '?') + '_nc=' + Date.now();
   };
   img.src = proxiedUrl;
 }
@@ -15273,7 +15371,11 @@ function coverUrlWithSize(url, size) {
   if (!size) return url;
   var param = 'param=' + size + 'y' + size;
   if (/[?&]param=\d+y\d+/i.test(url)) return url.replace(/([?&])param=\d+y\d+/i, '$1' + param);
-  return url + (url.indexOf('?') >= 0 ? '&' : '?') + param;
+  // Only Netease & Tencent CDNs understand param=; other CDNs reject it
+  if (/\.(126\.net|163\.com|qq\.com|gtimg\.cn)(\/|$)/i.test(url)) {
+    return url + (url.indexOf('?') >= 0 ? '&' : '?') + param;
+  }
+  return url;
 }
 function songCustomCoverKey(song) {
   if (!song) return '';
@@ -16592,9 +16694,14 @@ function openArtistDetailForSong(song) {
 }
 function resolveArtistSongForDetail(song, artist) {
   var provider = songProviderKey(song) === 'qq' ? 'qq' : 'netease';
-  var url = provider === 'qq'
-    ? '/api/qq/search?keywords=' + encodeURIComponent(artist) + '&limit=8'
-    : '/api/search?keywords=' + encodeURIComponent(artist) + '&limit=10';
+  var url;
+  if (fx.lxSourceEnabled) {
+    url = '/api/lx/search?keywords=' + encodeURIComponent(artist) + '&source=' + encodeURIComponent(provider) + '&limit=10';
+  } else if (provider === 'qq') {
+    url = '/api/qq/search?keywords=' + encodeURIComponent(artist) + '&limit=8';
+  } else {
+    url = '/api/search?keywords=' + encodeURIComponent(artist) + '&limit=10';
+  }
   return apiJson(url).then(function(r){
     var songs = (r && r.songs) || [];
     for (var i = 0; i < songs.length; i++) {
@@ -17292,7 +17399,9 @@ function updateSearchModeTabs() {
   requestAnimationFrame(updateSearchPillGlassDisplacementMap);
 }
 function setSearchMode(mode) {
-  mode = (mode === 'podcast' || mode === 'netease' || mode === 'qq') ? mode : 'song';
+  var validDefault = (mode === 'podcast' || mode === 'netease' || mode === 'qq') ? mode : null;
+  var validLx = (mode === 'kw' || mode === 'kg' || mode === 'tx' || mode === 'wy' || mode === 'mg') ? mode : null;
+  mode = fx.lxSourceEnabled ? (validLx || mode === 'song' ? mode : 'song') : (validDefault || 'song');
   if (searchMode === mode) return;
   searchMode = mode;
   updateSearchModeTabs();
@@ -17506,12 +17615,19 @@ document.addEventListener('click', function(e){
 updateSearchModeTabs();
 
 function songProviderKey(song) {
-  if (song && (song.provider === 'qq' || song.source === 'qq' || song.type === 'qq')) return 'qq';
+  if (!song) return 'netease';
+  var src = (song.provider || song.source || song.type || '').toLowerCase();
+  if (src === 'qq' || src === 'tx') return 'qq';
+  if (src === 'kw') return 'kw';
+  if (src === 'kg') return 'kg';
+  if (src === 'wy' || src === 'netease') return 'netease';
+  if (src === 'mg') return 'mg';
   return 'netease';
 }
 function songSourceTagHtml(song) {
   var key = songProviderKey(song);
-  var label = key === 'qq' ? 'QQ' : 'NE';
+  var labels = { qq: 'QQ', netease: 'NE', kw: 'KW', kg: 'KG', tx: 'TX', wy: 'WY', mg: 'MG' };
+  var label = labels[key] || key.toUpperCase();
   return '<span class="tag-source ' + key + '">' + label + '</span>';
 }
 function searchResultMetaText(song) {
@@ -17646,6 +17762,16 @@ function mergeSongSearchResults(neteaseSongs, qqSongs, limit, q) {
   return out.slice(0, limit);
 }
 async function fetchMusicSearchResults(q, mode) {
+  if (fx.lxSourceEnabled) {
+    var lxSearchUrl = '/api/lx/search?keywords=' + encodeURIComponent(q) + '&limit=18';
+    var lxModeSourceMap = { qq: 'tx', netease: 'wy', song: '' };
+    var lxSrc = lxModeSourceMap[mode];
+    if (lxSrc === undefined) lxSrc = mode;
+    if (lxSrc) lxSearchUrl += '&source=' + encodeURIComponent(lxSrc);
+    var lxResult = await apiJson(lxSearchUrl);
+    var lxSongs = (lxResult.songs || []).map(normalizeLxSearchSong).filter(function(s) { return s && s.id; });
+    return mergeSongSearchResults(lxSongs, [], 18, q);
+  }
   if (mode === 'qq') {
     var qqOnly = await apiJson('/api/qq/search?keywords=' + encodeURIComponent(q) + '&limit=12');
     return mergeSongSearchResults([], qqOnly.songs || [], 18, q);
@@ -18133,10 +18259,15 @@ function playSearchResult(i) {
 var firstPlayDone = false;
 
 function playbackProviderLabel(song) {
-  return songProviderKey(song) === 'qq' ? 'QQ 音乐' : '网易云';
+  var key = songProviderKey(song);
+  var labels = { qq: 'QQ 音乐', netease: '网易云', kw: '酷我', kg: '酷狗', tx: 'QQ 音乐', wy: '网易云', mg: '咪咕' };
+  return labels[key] || '音乐平台';
 }
 function playbackLoginProvider(song) {
-  return songProviderKey(song) === 'qq' ? 'qq' : 'netease';
+  var key = songProviderKey(song);
+  if (key === 'qq' || key === 'tx') return 'qq';
+  if (key === 'wy' || key === 'netease') return 'netease';
+  return key;
 }
 function playbackRestrictionMessage(song, data) {
   data = data || {};
@@ -18236,9 +18367,14 @@ async function searchAlternatePlatformSong(song) {
   var artist = artistNameParts(song)[0] || '';
   var query = [song.name || song.title || '', song.artist || artist].filter(Boolean).join(' ').trim();
   if (!query) return null;
-  var url = target === 'qq'
-    ? '/api/qq/search?keywords=' + encodeURIComponent(query) + '&limit=8'
-    : '/api/search?keywords=' + encodeURIComponent(query) + '&limit=12';
+  var url;
+  if (fx.lxSourceEnabled) {
+    url = '/api/lx/search?keywords=' + encodeURIComponent(query) + '&source=' + encodeURIComponent(target) + '&limit=12';
+  } else if (target === 'qq') {
+    url = '/api/qq/search?keywords=' + encodeURIComponent(query) + '&limit=8';
+  } else {
+    url = '/api/search?keywords=' + encodeURIComponent(query) + '&limit=12';
+  }
   var data = await apiJson(url);
   var list = data && (data.songs || data.result || []);
   for (var i = 0; i < list.length; i++) {
@@ -18282,6 +18418,10 @@ async function tryAutoPlaybackFallback(song, data, idx, token, opts) {
     return true;
   }
   if (!song || song.type === 'local' || song.type === 'podcast' || song.source === 'podcast') return false;
+  // LX mode: search across all available LX sources
+  if (fx.lxSourceEnabled) {
+    return tryLxSourceFallback(song, idx, token, opts);
+  }
   var restriction = (data && data.restriction) || {};
   var category = (data && data.reason) || restriction.category || '';
   var fromLabel = playbackProviderLabel(song);
@@ -18468,9 +18608,30 @@ async function playQueueAt(idx, opts) {
       requestedQuality = qqPlaybackQualityCeiling;
     }
     var qualityParam = '&quality=' + encodeURIComponent(requestedQuality);
-    var data = isQQPlayback
-      ? await apiJson('/api/qq/song/url?mid=' + encodeURIComponent(song.mid || song.songmid || song.id || '') + '&mediaMid=' + encodeURIComponent(song.mediaMid || song.media_mid || '') + qualityParam)
-      : await apiJson('/api/song/url?id=' + song.id + qualityParam);
+    var data;
+    // LX fallback: use pre-resolved audio URL
+    if (opts.lxFallbackUrl) {
+      data = { url: opts.lxFallbackUrl.replace('/api/audio?url=', ''), playable: true };
+    } else if (fx.lxSourceEnabled) {
+      // LX engine expects raw source codes: wy, tx, kw, kg, mg
+      var lxSrc2 = song.provider || song.source || 'wy';
+      var lxId2 = song.songmid || song.mid || song.id || '';
+      var lxUrl2 = '/api/lx/song/url?source=' + encodeURIComponent(lxSrc2) + '&songId=' + encodeURIComponent(lxId2) + qualityParam;
+      var lxHash2 = song.hash || song.copyrightId || '';
+      if (lxHash2 && lxHash2 !== lxId2) lxUrl2 += '&hash=' + encodeURIComponent(lxHash2);
+      if (song.copyrightId && song.copyrightId !== lxHash2) lxUrl2 += '&copyrightId=' + encodeURIComponent(song.copyrightId);
+      // Pass full song metadata for source scripts that need it (e.g. juhe)
+      if (song.name) lxUrl2 += '&name=' + encodeURIComponent(song.name);
+      if (song.artist || song.singer) lxUrl2 += '&singer=' + encodeURIComponent(song.artist || song.singer || '');
+      if (song.interval) lxUrl2 += '&interval=' + encodeURIComponent(song.interval);
+      if (song.album) lxUrl2 += '&album=' + encodeURIComponent(song.album || '');
+      if (song.img || song.cover) lxUrl2 += '&img=' + encodeURIComponent(song.img || song.cover || '');
+      data = await apiJson(lxUrl2, { timeoutMs: 15000 });
+    } else if (isQQPlayback) {
+      data = await apiJson('/api/qq/song/url?mid=' + encodeURIComponent(song.mid || song.songmid || song.id || '') + '&mediaMid=' + encodeURIComponent(song.mediaMid || song.media_mid || '') + qualityParam);
+    } else {
+      data = await apiJson('/api/song/url?id=' + song.id + qualityParam);
+    }
     if (token !== trackSwitchToken) return;
     if (!data.url) {
       if (isQQPlayback && await retryQQPlaybackWithCompatibleQuality(song, idx, token, opts, data, requestedQuality)) return;
@@ -18570,7 +18731,10 @@ async function playQueueAt(idx, opts) {
         scheduleQueueBeatPrefetch(idx, 2600);
       } else {
         // 后台延迟分析, 避免新歌刚开始播放时抢占解码和渲染资源
-        scheduleBeatAnalysis(bmKey || song.id, proxyAudioUrl, bmTok, song);
+        // Use raw CDN URL for beat analysis to avoid deadlock with playback stream
+        if (data.url) {
+          scheduleBeatAnalysis(bmKey || song.id, data.url, bmTok, song);
+        }
       }
     }
     } catch (visualErr) {
@@ -18578,6 +18742,19 @@ async function playQueueAt(idx, opts) {
       currentBeatMap = null;
       beatMapNextIdx = 0;
       safePlaybackStep('visual-prep-hide-chip', hideBeatChip);
+    }
+    // Simple direct cover load for particle visual (bypasses complex loadCoverFromUrl)
+    if (song.cover && uniforms) {
+      var directImg = new Image(); directImg.crossOrigin = 'anonymous';
+      directImg.onload = function() {
+        if (token !== trackSwitchToken) return;
+        var size = Math.min(256, Math.min(directImg.naturalWidth, directImg.naturalHeight));
+        var cv2 = document.createElement('canvas'); cv2.width = cv2.height = size;
+        cv2.getContext('2d').drawImage(directImg, 0, 0, size, size);
+        applyCoverCanvas(cv2, song.cover, { coverKey: song.cover || '', coverSourceKind: 'url', coverSource: song.cover });
+      };
+      directImg.onerror = function() {};
+      directImg.src = song.cover + (song.cover.indexOf('?') >= 0 ? '&' : '?') + '_cv=' + Date.now();
     }
     markPlayPhase('audio-start');
     var playbackStarted = await playAudio({ silent: isQQPlayback });
@@ -18634,14 +18811,20 @@ async function attemptAudioPlay(opts) {
       if (!audio) return false;
       if (!audioReady) initAudio();
       if (opts.fade !== false) preparePlaybackFadeIn();
+      // Wrap audio.play() with timeout to prevent hanging
+      var playPromise;
       if (opts.manual) {
-        var manualPlay = audio.play();
+        playPromise = audio.play();
         await resumeAudioAnalysis();
-        await manualPlay;
+        await playPromise;
       } else {
         await resumeAudioAnalysis();
-        await audio.play();
+        playPromise = audio.play();
       }
+      var playTimeout = new Promise(function(_, reject) {
+        setTimeout(function() { reject(new Error('Play timeout')); }, 20000);
+      });
+      await Promise.race([playPromise, playTimeout]);
       await resumeAudioAnalysis();
       switchPlaybackVisualToEmily();
       playing = true; setPlayIcon(true);
@@ -19017,14 +19200,21 @@ function clearPlayerControlFocusState(reason) {
 async function fetchLyric(songOrId, token) {
   try {
     var song = (songOrId && typeof songOrId === 'object') ? songOrId : null;
-    var provider = songProviderKey(song);
+    // Use raw source code for routing: wy/tx→netease/qq, kw→kw, kg→kg
+    var rawSrc = (song && (song.provider || song.source || '')) ? (song.provider || song.source).toLowerCase() : '';
     var endpoint;
-    if (provider === 'qq') {
+    if (rawSrc === 'tx' || rawSrc === 'qq') {
       var mid = song.mid || song.songmid || song.id || '';
       var qqId = song.qqId || (/^\d+$/.test(String(song.id || '')) ? song.id : '');
       endpoint = '/api/qq/lyric?mid=' + encodeURIComponent(mid) + '&id=' + encodeURIComponent(qqId);
+    } else if (rawSrc === 'kw') {
+      var kwId = song.songmid || song.id || '';
+      endpoint = '/api/kw/lyric?id=' + encodeURIComponent(kwId);
+    } else if (rawSrc === 'kg') {
+      // kg lyrics use KRC format — not compatible with parseLyricText, skip
+      throw new Error('skip');
     } else {
-      var songId = song ? song.id : songOrId;
+      var songId = song ? (song.songmid || song.id) : songOrId;
       endpoint = '/api/lyric?id=' + encodeURIComponent(songId);
     }
     var r = await apiJson(endpoint);
@@ -21526,6 +21716,7 @@ function updateFxInputs() {
   updateCustomBackgroundControls();
   updateVisualTintControls();
   applyControlGlassChromaticOffset();
+  updateLxUI();
   syncFxUniforms();
 }
 function animateFxResetButton(btn) {
@@ -21591,7 +21782,7 @@ function fxPanelTargetForNode(node, current) {
   if (id === 'preset-grid' || id === 'user-archive-grid') return 'presets';
   if (id === 'fx-lyric-fold') return 'lyrics';
   if (id === 'fx-overlay-fold' || id === 'fx-stage-fold') return 'motion';
-  if (id === 'fx-advanced' || node.classList.contains('fx-actions')) return 'advanced';
+  if (id === 'fx-advanced' || id === 'fx-lx-source-fold' || node.classList.contains('fx-actions')) return 'advanced';
   if (node.classList.contains('lyric-color-row') || node.classList.contains('cover-color-pop') || node.classList.contains('color-lab-pop') || node.classList.contains('cover-color-loupe')) return 'appearance';
   if (inputId === 'fx-bgopacity' || inputId === 'fx-glassaberration') return 'appearance';
   if (inputId === 'fx-lyricglow') return 'lyrics';
@@ -21650,7 +21841,7 @@ function organizeFxPanel() {
     }
     (pages[target] || pages.presets).appendChild(node);
   });
-  ['fx-lyric-fold','fx-overlay-fold','fx-stage-fold','fx-advanced'].forEach(function(id){
+  ['fx-lyric-fold','fx-overlay-fold','fx-stage-fold','fx-lx-source-fold','fx-advanced'].forEach(function(id){
     var fold = document.getElementById(id);
     if (fold) fold.classList.add('open');
   });
@@ -22355,6 +22546,13 @@ function bindFxPanel() {
       setPerformanceQualityMode(btn.getAttribute('data-performance-quality'));
     });
   });
+  // LX mode switch
+  var lxModeSeg = document.getElementById('lx-mode-seg');
+  if (lxModeSeg) {
+    lxModeSeg.querySelectorAll('button').forEach(function(b) {
+      b.addEventListener('click', function() { setLxMode(b.dataset.lxMode); });
+    });
+  }
   updateFxInputs();
 }
 function toggleFx(key) {
@@ -22438,6 +22636,435 @@ function toggleFxPanel(force) {
   el.classList.remove('show', 'closing');
   setPeek(el, true, 'fx');
 }
+// ---------- LX source management ----------
+var lxSourceCache = null;
+
+function fetchLxSources() {
+  return fetch('/api/lx/sources').then(function(r) { return r.json(); }).then(function(d) {
+    lxSourceCache = d.sources || [];
+    return lxSourceCache;
+  }).catch(function(err) {
+    console.error('[lx] fetch sources error:', err);
+    return lxSourceCache || [];
+  });
+}
+
+function fetchLxStatus() {
+  return fetch('/api/lx/status').then(function(r) { return r.json(); }).then(function(d) {
+    return d;
+  }).catch(function(err) {
+    console.error('[lx] fetch status error:', err);
+    return { enabled: false, sourceCount: 0, sources: [] };
+  });
+}
+
+function setLxMode(mode) {
+  var enabled = mode === 'lx';
+  fx.lxSourceEnabled = enabled;
+  fetch('/api/lx/set-active', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled: enabled, activeId: fx.lxActiveSourceId || undefined }),
+  }).then(function(r) { return r.json(); }).then(function(d) {
+    if (d.ok) { fx.lxActiveSourceId = d.status.activeId; }
+    updateLxUI();
+    saveLyricLayout();
+    showToast(enabled ? '已切换到 LX 源模式' : '已切换回默认模式');
+  }).catch(function(err) {
+    console.error('[lx] set mode error:', err);
+    updateLxUI();
+    saveLyricLayout();
+  });
+}
+
+function setLxActiveSource(id) {
+  fx.lxActiveSourceId = id;
+  fetch('/api/lx/set-active', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ activeId: id, enabled: true }),
+  }).then(function(r) { return r.json(); }).then(function() {
+    updateLxUI();
+    saveLyricLayout();
+    showToast('已切换活跃源');
+  }).catch(function(err) { console.error('[lx] set active error:', err); });
+}
+
+function showLxImportInput() {
+  var row = document.getElementById('lx-import-row');
+  var btn = document.getElementById('lx-import-btn');
+  var input = document.getElementById('lx-import-url');
+  if (row) row.style.display = 'flex';
+  if (btn) btn.style.display = 'none';
+  if (input) { input.value = ''; setTimeout(function(){ input.focus(); }, 100); }
+}
+function hideLxImportInput() {
+  var row = document.getElementById('lx-import-row');
+  var btn = document.getElementById('lx-import-btn');
+  if (row) row.style.display = 'none';
+  if (btn) btn.style.display = '';
+}
+function doLxImport() {
+  var input = document.getElementById('lx-import-url');
+  var url = input ? input.value.trim() : '';
+  if (!url) { showToast('请输入 URL'); return; }
+  if (!/^https?:\/\//i.test(url)) { showToast('请输入有效的 http/https 地址'); return; }
+  var confirmBtn = document.getElementById('lx-import-confirm');
+  var cancelBtn = document.getElementById('lx-import-cancel');
+  if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = '导入中...'; }
+  if (cancelBtn) cancelBtn.disabled = true;
+  fetch('/api/lx/import', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url: url }),
+  }).then(function(r) { return r.json(); }).then(function(d) {
+    if (d.ok) {
+      showToast('源导入成功: ' + (d.source.name || 'unknown'));
+      // Auto-activate: set as active source and enable LX mode
+      fx.lxActiveSourceId = d.source.id;
+      fx.lxSourceEnabled = true;
+      // Sync to server
+      return fetch('/api/lx/set-active', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ activeId: d.source.id, enabled: true }),
+      }).then(function() { return d; });
+    } else {
+      showToast('导入失败: ' + (d.error || 'unknown error'));
+      throw new Error('import failed');
+    }
+  }).then(function(d) {
+    if (!d) return;
+    hideLxImportInput();
+    updateLxUI();
+    saveLyricLayout();
+  }).catch(function(err) {
+    if (err.message !== 'import failed') {
+      console.error('[lx] import error:', err);
+      showToast('导入失败: 网络错误');
+    }
+  }).then(function() {
+    if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = '确认'; }
+    if (cancelBtn) { cancelBtn.disabled = false; }
+  });
+}
+// -- Local file import --
+function showLxLocalImportInput() {
+  var row = document.getElementById('lx-import-local-row');
+  var btn = document.getElementById('lx-import-local-btn');
+  var input = document.getElementById('lx-import-local-path');
+  // Hide online import row if open
+  hideLxImportInput();
+  if (row) row.style.display = 'flex';
+  if (btn) btn.style.display = 'none';
+  if (input) { input.value = ''; setTimeout(function(){ input.focus(); }, 100); }
+}
+function hideLxLocalImportInput() {
+  var row = document.getElementById('lx-import-local-row');
+  var btn = document.getElementById('lx-import-local-btn');
+  if (row) row.style.display = 'none';
+  if (btn) btn.style.display = '';
+}
+function doLxLocalImport() {
+  var input = document.getElementById('lx-import-local-path');
+  var filePath = input ? input.value.trim() : '';
+  if (!filePath) { showToast('请输入文件路径'); return; }
+  var confirmBtn = document.getElementById('lx-import-local-confirm');
+  var cancelBtn = document.getElementById('lx-import-local-cancel');
+  if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = '导入中...'; }
+  if (cancelBtn) cancelBtn.disabled = true;
+  fetch('/api/lx/import-local', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ filePath: filePath }),
+  }).then(function(r) { return r.json(); }).then(function(d) {
+    if (d.ok) {
+      showToast('本地源导入成功: ' + (d.source.name || 'unknown'));
+      fx.lxActiveSourceId = d.source.id;
+      fx.lxSourceEnabled = true;
+      return fetch('/api/lx/set-active', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ activeId: d.source.id, enabled: true }),
+      }).then(function() { return d; });
+    } else {
+      showToast('导入失败: ' + (d.error || 'unknown error'));
+      throw new Error('import failed');
+    }
+  }).then(function(d) {
+    if (!d) return;
+    hideLxLocalImportInput();
+    updateLxUI();
+    saveLyricLayout();
+  }).catch(function(err) {
+    if (err.message !== 'import failed') {
+      console.error('[lx] local import error:', err);
+      showToast('导入失败: ' + (err.message || '未知错误'));
+    }
+  }).then(function() {
+    if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = '确认'; }
+    if (cancelBtn) { cancelBtn.disabled = false; }
+  });
+}
+
+function refreshLxSource(id) {
+  fetch('/api/lx/refresh', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id: id }),
+  }).then(function(r) { return r.json(); }).then(function(d) {
+    if (d.ok) { showToast('源已刷新'); }
+    else { showToast('刷新失败: ' + (d.error || 'unknown')); }
+    updateLxUI();
+  }).catch(function(err) {
+    console.error('[lx] refresh error:', err);
+    showToast('刷新失败: 网络错误');
+  });
+}
+
+function deleteLxSource(id) {
+  if (!confirm('确定要删除这个音乐源吗？')) return;
+  fetch('/api/lx/delete', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id: id }),
+  }).then(function(r) { return r.json(); }).then(function(d) {
+    if (d.ok) {
+      if (fx.lxActiveSourceId === id) fx.lxActiveSourceId = null;
+      showToast('源已删除');
+    } else { showToast('删除失败'); }
+    updateLxUI();
+    saveLyricLayout();
+  }).catch(function(err) {
+    console.error('[lx] delete error:', err);
+    showToast('删除失败');
+  });
+}
+
+function renderLxSourceList(sources, activeId) {
+  if (!sources || !sources.length) {
+    return '<div style="font-size:10.5px;color:rgba(255,255,255,.38);padding:6px 0">暂无导入的源，点击上方按钮导入。</div>';
+  }
+  return sources.map(function(s) {
+    var platBadges = (s.sources || []).map(function(p) {
+      return '<span class="src-platform">' + p + '</span>';
+    }).join('');
+    return '<div class="lx-source-item">' +
+      '<span class="lx-status-dot ' + (s.loaded ? 'on' : 'err') + '" style="flex-shrink:0;width:6px;height:6px"></span>' +
+      '<div class="src-info">' +
+        '<div class="src-name">' + escapeHTML(s.name || 'unknown') + ' <span style="font-weight:400;color:rgba(255,255,255,.35)">v' + escapeHTML(s.version || '') + '</span></div>' +
+        '<div class="src-meta">' + platBadges + ' · ' + escapeHTML(s.author || 'unknown') + '</div>' +
+      '</div>' +
+      '<div class="src-actions">' +
+        '<button class="src-act-btn" onclick="refreshLxSource(\'' + s.id + '\')" title="刷新">刷新</button>' +
+        '<button class="src-act-btn danger" onclick="deleteLxSource(\'' + s.id + '\')" title="删除">删</button>' +
+      '</div>' +
+    '</div>';
+  }).join('');
+}
+
+function updateLxUI() {
+  // URL parameter: ?lx=1 forces LX mode (for browser testing without Electron)
+  if (window.location.search.indexOf('lx=1') >= 0 && !fx.lxSourceEnabled) {
+    fx.lxSourceEnabled = true;
+    fetch('/api/lx/set-active', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({enabled:true})}).catch(function(){});
+  }
+  fetchLxSources().then(function(sources) {
+    fetchLxStatus().then(function(status) {
+      // Sync frontend state with server state on first load
+      if (status.enabled && !fx.lxSourceEnabled) {
+        fx.lxSourceEnabled = true;
+        fx.lxActiveSourceId = status.activeId;
+        saveLyricLayout();
+      } else if (!status.enabled && fx.lxSourceEnabled) {
+        fx.lxSourceEnabled = false;
+        saveLyricLayout();
+      }
+      var modeSeg = document.getElementById('lx-mode-seg');
+      if (modeSeg) {
+        modeSeg.querySelectorAll('button').forEach(function(b) {
+          b.classList.toggle('active', (b.dataset.lxMode === 'lx') === !!fx.lxSourceEnabled);
+        });
+      }
+      var activeSection = document.getElementById('lx-active-source-section');
+      var activeSeg = document.getElementById('lx-active-source-seg');
+      if (activeSection && activeSeg) {
+        if (fx.lxSourceEnabled && sources.length > 0) {
+          activeSection.style.display = '';
+          activeSeg.innerHTML = sources.map(function(s) {
+            return '<button data-lx-sid="' + s.id + '" class="' + (s.id === fx.lxActiveSourceId ? 'active' : '') + '">' + escapeHTML(s.name) + '</button>';
+          }).join('');
+          activeSeg.querySelectorAll('button').forEach(function(b) {
+            b.addEventListener('click', function() { setLxActiveSource(b.dataset.lxSid); });
+          });
+        } else {
+          activeSection.style.display = 'none';
+        }
+      }
+      var list = document.getElementById('lx-source-list');
+      if (list) { list.innerHTML = renderLxSourceList(sources, fx.lxActiveSourceId); }
+      var dot = document.getElementById('lx-status-dot');
+      var text = document.getElementById('lx-status-text');
+      if (dot && text) {
+        if (fx.lxSourceEnabled && sources.length > 0) {
+          dot.className = 'lx-status-dot on';
+          var activeSrc = sources.find(function(s) { return s.id === fx.lxActiveSourceId; });
+          text.textContent = activeSrc ? 'LX 源 · ' + activeSrc.name + ' · ' + (activeSrc.sources || []).join(', ') : 'LX 源已启用';
+        } else if (fx.lxSourceEnabled && !sources.length) {
+          dot.className = 'lx-status-dot err';
+          text.textContent = 'LX 源已启用但无可用源，请先导入';
+        } else {
+          dot.className = 'lx-status-dot off';
+          text.textContent = '默认模式 · 网易云 / QQ 音乐';
+        }
+      }
+      updateSearchModeTabs();
+    });
+  });
+}
+
+function updateSearchModeTabs() {
+  var tabs = document.getElementById('search-mode-tabs');
+  if (!tabs) return;
+  var songBtn = document.getElementById('search-mode-song');
+  var neBtn = document.getElementById('search-mode-netease');
+  var qqBtn = document.getElementById('search-mode-qq');
+  var podBtn = document.getElementById('search-mode-podcast');
+  var lxContainer = document.getElementById('lx-search-mode-btns');
+  if (fx.lxSourceEnabled) {
+    if (neBtn) neBtn.style.display = 'none';
+    if (qqBtn) qqBtn.style.display = 'none';
+    if (podBtn) podBtn.style.display = 'none';
+    var activeSrc = lxSourceCache ? lxSourceCache.find(function(s) { return s.id === fx.lxActiveSourceId; }) : null;
+    var srcList = activeSrc && activeSrc.sources ? activeSrc.sources : ['kw','kg','tx','wy','mg'];
+    var labels = { kw: 'KW', kg: 'KG', tx: 'TX', wy: 'WY', mg: 'MG' };
+    if (searchMode !== 'song' && srcList.indexOf(searchMode) === -1) searchMode = 'song';
+    if (lxContainer) {
+      lxContainer.style.display = '';
+      lxContainer.innerHTML = srcList.map(function(src) {
+        return '<button type="button" class="' + (searchMode === src ? 'active' : '') + '" onclick="setSearchMode(\'' + src + '\')">' + (labels[src] || src.toUpperCase()) + '</button>';
+      }).join('');
+    }
+    if (songBtn) { songBtn.textContent = 'All'; songBtn.classList.toggle('active', searchMode === 'song'); }
+  } else {
+    if (neBtn) neBtn.style.display = '';
+    if (qqBtn) qqBtn.style.display = '';
+    if (podBtn) podBtn.style.display = '';
+    if (lxContainer) { lxContainer.style.display = 'none'; lxContainer.innerHTML = ''; }
+    if (songBtn) { songBtn.textContent = 'All'; songBtn.classList.toggle('active', searchMode === 'song'); }
+    if (neBtn) neBtn.classList.toggle('active', searchMode === 'netease');
+    if (qqBtn) qqBtn.classList.toggle('active', searchMode === 'qq');
+    if (podBtn) podBtn.classList.toggle('active', searchMode === 'podcast');
+    if (searchMode !== 'song' && searchMode !== 'netease' && searchMode !== 'qq' && searchMode !== 'podcast') searchMode = 'song';
+  }
+}
+
+// LX fallback: try alternate sources for same song (lx-music-desktop style: parallel search all sources)
+async function tryLxSourceFallback(song, idx, token, opts) {
+  opts = opts || {};
+  if (opts.fallbackDepth > 0) {
+    skipFailedQueueItem(idx, token, 'LX 自动换源后的版本仍不可播，播放下一首。');
+    return true;
+  }
+  // Use raw LX source code (wy, tx, kw, kg, mg), not display name (netease, qq)
+  var currentSrc = (song.provider || song.source || '').toLowerCase();
+  var activeSrc = lxSourceCache ? lxSourceCache.find(function(s) { return s.id === fx.lxActiveSourceId; }) : null;
+  var altSources = activeSrc && activeSrc.sources ? activeSrc.sources.filter(function(s) { return s !== currentSrc; }) : [];
+  if (!altSources.length) {
+    skipFailedQueueItem(idx, token, '当前 LX 源无其他平台可选，播放下一首。');
+    return true;
+  }
+  var query = (song.name || '').trim() + ' ' + (song.artist || song.singer || '').trim();
+  var fromLabel = (playbackProviderLabel(song) || currentSrc).toUpperCase();
+  showSourceFallbackNotice('正在自动换源', fromLabel + ' 当前不可播，正在 LX 源中查找。');
+  // Parallel search across all alternate sources (lx-music-desktop style)
+  try {
+    var searchPromises = altSources.map(function(src) {
+      return apiJson('/api/lx/search?keywords=' + encodeURIComponent(query) + '&source=' + encodeURIComponent(src) + '&limit=5')
+        .then(function(r) { return { src: src, songs: r.songs || [] }; })
+        .catch(function() { return { src: src, songs: [] }; });
+    });
+    var allResults = await Promise.all(searchPromises);
+    if (token !== trackSwitchToken) return true;
+    // Find best matching song across all alternate sources
+    var bestMatch = null;
+    var bestSrc = null;
+    var songName = (song.name || '').toLowerCase().trim();
+    for (var i = 0; i < allResults.length; i++) {
+      var res = allResults[i];
+      for (var j = 0; j < res.songs.length; j++) {
+        var s = res.songs[j];
+        if (!s || !s.id) continue;
+        var sName = (s.name || '').toLowerCase().trim();
+        if (sName === songName || sName.indexOf(songName) >= 0 || songName.indexOf(sName) >= 0) {
+          bestMatch = s; bestSrc = res.src; break;
+        }
+      }
+      if (bestMatch) break;
+    }
+    if (!bestMatch) {
+      skipFailedQueueItem(idx, token, '没有找到同名同歌手的 LX 其他源版本，播放下一首。');
+      return true;
+    }
+    bestMatch = normalizeLxSearchSong(bestMatch);
+    if (!bestMatch || !bestMatch.id) {
+      skipFailedQueueItem(idx, token, '没有找到同名同歌手的 LX 其他源版本，播放下一首。');
+      return true;
+    }
+    var fbUrl = '/api/lx/song/url?source=' + encodeURIComponent(bestSrc) + '&songId=' + encodeURIComponent(bestMatch.songmid || bestMatch.id) + '&quality=320k';
+    var fbHash = bestMatch.hash || '';
+    if (fbHash && fbHash !== (bestMatch.songmid || bestMatch.id)) fbUrl += '&hash=' + encodeURIComponent(fbHash);
+    if (bestMatch.name) fbUrl += '&name=' + encodeURIComponent(bestMatch.name);
+    if (bestMatch.artist || bestMatch.singer) fbUrl += '&singer=' + encodeURIComponent(bestMatch.artist || bestMatch.singer || '');
+    if (bestMatch.interval) fbUrl += '&interval=' + encodeURIComponent(bestMatch.interval);
+    var urlData = await apiJson(fbUrl);
+    if (token !== trackSwitchToken) return true;
+    if (urlData && urlData.url) {
+      var fullAudioUrl = '/api/audio?url=' + encodeURIComponent(urlData.url);
+      bestMatch.autoFallbackFrom = currentSrc;
+      bestMatch._lxFallbackAudioUrl = fullAudioUrl;
+      playQueue[idx] = hydrateCustomCover(bestMatch);
+      safeRenderQueuePanel('lx-fallback', { scrollCurrent: miniQueueOpen });
+      safeShelfRebuild('lx-fallback');
+      showSourceFallbackNotice('已自动切换音源', (song.name || '当前歌曲') + ' 已从 ' + fromLabel + ' 切到 ' + bestSrc.toUpperCase() + '。');
+      await playQueueAt(idx, { fallbackDepth: 1, lxFallbackUrl: fullAudioUrl });
+      return true;
+    }
+  } catch (e) {
+    console.error('[lx fallback] error:', e.message);
+    if (token !== trackSwitchToken) return true;
+  }
+  skipFailedQueueItem(idx, token, '没有找到同名同歌手的 LX 其他源版本，播放下一首。');
+  return true;
+}
+
+function normalizeLxSearchSong(s) {
+  if (!s) return null;
+  var coverImg = s.img || '';
+  return {
+    id: s.id || s.songmid || '',
+    name: s.name || '',
+    artist: s.singer || s.artist || '',
+    album: s.albumName || s.album || '',
+    albumId: s.albumId || '',
+    img: coverImg,
+    cover: coverImg, // Frontend uses song.cover for display/playback
+    interval: s.interval || '',
+    source: s.provider || s.source || 'kw',
+    songmid: s.songmid || s.id || '',
+    provider: s.provider || s.source || 'kw',
+    hash: s.hash || '',
+    copyrightId: s.copyrightId || '', // MG needs copyrightId for playback
+    types: s.types || [],
+    _types: s._types || {},
+  };
+}
+
+function escapeHTML(str) {
+  if (!str) return '';
+  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
 function resetFx() {
   var savedCam = fx.cam;
   var savedShelf = fx.shelf;

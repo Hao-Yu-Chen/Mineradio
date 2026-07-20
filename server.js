@@ -53,6 +53,48 @@ const tls = require('tls');
 const { once } = require('events');
 const { fileURLToPath } = require('url');
 const { analyzePodcastDjStream, analyzePodcastDjIntro } = require('./dj-analyzer');
+const lxEngine = require('./lx-source-engine');
+const lxSearch = require('./lx-search');
+
+// Map Mineradio quality names (hires/lossless/exhigh/standard) to LX source quality names
+// LX sources use simple bitrate labels like '128k', '320k', 'flac', 'flac24bit'
+function mapLxQuality(requestedQuality, source) {
+  // Quality rank (higher = better)
+  var rank = { 'master': 6, 'flac24bit': 5, 'flac': 4, '320k': 3, '128k': 2, '96k': 1 };
+  // Mineradio -> desired rank
+  var desiredRank = {
+    'jymaster': 6, 'master': 6, 'svip': 6,
+    'hires': 4, 'hi-res': 4, 'highres': 4, 'highest': 4,
+    'lossless': 4, 'flac': 4, 'sq': 4,
+    'exhigh': 3, 'high': 3, '320k': 3, 'hq': 3,
+    'standard': 2, 'normal': 2, 'std': 2, '128k': 2,
+  };
+  var target = desiredRank[requestedQuality.toLowerCase()] || 3; // default to 320k level
+
+  // Get supported qualities from active source
+  var supported = ['128k', '320k']; // minimum fallback
+  try {
+    var active = lxEngine.getActiveSource();
+    if (active && active.sources && active.sources[source]) {
+      var srcQualities = active.sources[source].qualitys || [];
+      if (srcQualities.length > 0) supported = srcQualities;
+    }
+  } catch (e) {}
+
+  // Sort by rank (highest first), then filter to ≤ target
+  var sorted = supported.slice().sort(function(a, b) { return (rank[b] || 0) - (rank[a] || 0); });
+  var result = [];
+  // First try: qualities ≤ target
+  for (var i = 0; i < sorted.length; i++) {
+    if ((rank[sorted[i]] || 0) <= target) result.push(sorted[i]);
+  }
+  // If nothing found, just use all supported
+  if (result.length === 0) result = sorted;
+  // Ensure we always have at least 320k and 128k to try
+  if (result.indexOf('320k') === -1) result.push('320k');
+  if (result.indexOf('128k') === -1) result.push('128k');
+  return result;
+}
 
 const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
@@ -4021,6 +4063,94 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // ---------- kw (酷我) 歌词 ----------
+  if (pn === '/api/kw/lyric') {
+    try {
+      var kwLyricId = url.searchParams.get('id') || '';
+      console.log('[KW Lyric] Request id=' + kwLyricId);
+      if (!kwLyricId) { sendJSON(res, { lyric: '', tlyric: '' }); return; }
+      // Inline fetch — simple HTTPS API, no zlib/XOR
+      var kwUrl = 'https://m.kuwo.cn/newh5/singles/songinfoandlrc?musicId=' + encodeURIComponent(kwLyricId);
+      var kwLyricAc = new AbortController();
+      var kwLyricTimer = setTimeout(function() { kwLyricAc.abort(); }, 8000);
+      var kwResp;
+      try {
+        kwResp = await fetch(kwUrl, { signal: kwLyricAc.signal, headers: { 'User-Agent': UA } });
+      } catch(e) {
+        clearTimeout(kwLyricTimer);
+        console.log('[KW Lyric] fetch error:', e.message);
+        sendJSON(res, { lyric: '', tlyric: '' });
+        return;
+      }
+      clearTimeout(kwLyricTimer);
+      var kwJson = await kwResp.json();
+      var kwList = (kwJson && kwJson.data && kwJson.data.lrclist) || [];
+      console.log('[KW Lyric] lines=' + kwList.length);
+      // Retry up to 3 times with increasing delay (API is unstable)
+      for (var retry = 0; retry < 3 && !kwList.length; retry++) {
+        var delay = 800 + retry * 1200;
+        console.log('[KW Lyric] empty, retry ' + (retry + 1) + '/3 after ' + delay + 'ms...');
+        await new Promise(function(r) { setTimeout(r, delay); });
+        var kwAcR = new AbortController();
+        var kwTimerR = setTimeout(function() { kwAcR.abort(); }, 8000);
+        try {
+          kwResp = await fetch(kwUrl, { signal: kwAcR.signal, headers: { 'User-Agent': UA, 'Referer': 'https://www.kuwo.cn/' } });
+        } catch(e) {
+          clearTimeout(kwTimerR);
+          continue;
+        }
+        clearTimeout(kwTimerR);
+        kwJson = await kwResp.json();
+        kwList = (kwJson && kwJson.data && kwJson.data.lrclist) || [];
+        console.log('[KW Lyric] retry ' + (retry + 1) + ' lines=' + kwList.length);
+      }
+      var kwLines = kwList.map(function(item) {
+        var s = parseFloat(item.time) || 0;
+        var m = Math.floor(s / 60);
+        var sec = (s % 60).toFixed(2);
+        var ts = (m < 10 ? '0' + m : m) + ':' + (sec < 10 ? '0' + sec : sec);
+        return '[' + ts + ']' + (item.lineLyric || '');
+      });
+      sendJSON(res, { lyric: kwLines.join('\n'), tlyric: '' });
+    } catch (err) {
+      console.error('[KW Lyric]', err.message);
+      sendJSON(res, { lyric: '', tlyric: '' });
+    }
+    return;
+  }
+
+  // ---------- kg (酷狗) 歌词 ----------
+  if (pn === '/api/kg/lyric') {
+    try {
+      var kgLyricName = url.searchParams.get('name') || '';
+      var kgLyricHash = url.searchParams.get('hash') || '';
+      var kgLyricTime = url.searchParams.get('time') || '300';
+      if (!kgLyricName && !kgLyricHash) { sendJSON(res, { lyric: '', tlyric: '' }); return; }
+      var kgLyricUrl = 'http://m.kugou.com/app/i/krc.php?cmd=100&keyword=' + encodeURIComponent(kgLyricName) +
+        '&hash=' + encodeURIComponent(kgLyricHash) + '&timelength=' + encodeURIComponent(kgLyricTime) + '&d=0.38664927426725626';
+      var kgAc = new AbortController();
+      var kgTimer = setTimeout(function() { kgAc.abort(); }, 8000);
+      var kgLyricResp;
+      try {
+        kgLyricResp = await fetch(kgLyricUrl, {
+          headers: { 'KG-RC': '1', 'KG-THash': 'expand_search_manager.cpp:852736169:451', 'User-Agent': 'KuGou2012-9020-ExpandSearchManager' },
+          signal: kgAc.signal,
+        });
+      } catch(e) {
+        clearTimeout(kgTimer);
+        sendJSON(res, { lyric: '', tlyric: '' });
+        return;
+      }
+      clearTimeout(kgTimer);
+      var kgLyricText = await kgLyricResp.text();
+      sendJSON(res, { lyric: kgLyricText || '', tlyric: '' });
+    } catch (err) {
+      console.error('[KG Lyric]', err.message);
+      sendJSON(res, { lyric: '', tlyric: '' });
+    }
+    return;
+  }
+
   // ---------- 歌曲评论 ----------
   if (pn === '/api/song/comments') {
     try {
@@ -4141,7 +4271,27 @@ const server = http.createServer(async (req, res) => {
         res.end('Invalid cover url');
         return;
       }
-      const resp = await fetch(coverUrl, { headers: { 'User-Agent': UA, 'Referer': 'https://music.163.com/' } });
+      // Host-appropriate Referer (like audioProxyHeadersFor)
+      var coverReferer = 'https://music.163.com/';
+      try {
+        var coverHost = new URL(coverUrl).hostname.toLowerCase();
+        if (coverHost.includes('qq.com') || coverHost.includes('gtimg.cn')) coverReferer = 'https://y.qq.com/';
+        else if (coverHost.includes('kuwo.cn')) coverReferer = 'https://www.kuwo.cn/';
+        else if (coverHost.includes('kugou.com')) coverReferer = 'https://www.kugou.com/';
+        else if (coverHost.includes('migu.cn')) coverReferer = 'https://music.migu.cn/';
+      } catch(e) {}
+      var coverAc = new AbortController();
+      var coverTimer = setTimeout(function() { coverAc.abort(); }, 10000);
+      var resp;
+      try {
+        resp = await fetch(coverUrl, { headers: { 'User-Agent': UA, 'Referer': coverReferer }, signal: coverAc.signal });
+      } catch (fetchErr) {
+        clearTimeout(coverTimer);
+        res.writeHead(502, { 'Access-Control-Allow-Origin': '*' });
+        res.end('Cover fetch failed');
+        return;
+      }
+      clearTimeout(coverTimer);
       const ct  = resp.headers.get('content-type') || 'image/jpeg';
       const cl  = resp.headers.get('content-length');
       const hdr = {
@@ -4153,7 +4303,23 @@ const server = http.createServer(async (req, res) => {
       if (cl) hdr['Content-Length'] = cl;
       res.writeHead(resp.status, hdr);
       const reader = resp.body.getReader();
-      while (true) { const c = await reader.read(); if (c.done) break; res.write(c.value); }
+      var coverEnded = false;
+      var coverTimer2 = setTimeout(function() {
+        if (!coverEnded) { coverEnded = true; try { reader.cancel(); } catch(e) {} }
+      }, 15000);
+      try {
+        var coverChunkBytes = 0;
+        while (true) {
+          const c = await reader.read();
+          if (c.done) { coverEnded = true; break; }
+          res.write(c.value);
+          coverChunkBytes += c.value.length;
+          if (coverChunkBytes > 65536) { coverChunkBytes = 0; await new Promise(function(r) { setImmediate(r); }); }
+        }
+      } catch (streamErr) {
+        if (!coverEnded) { coverEnded = true; }
+      }
+      clearTimeout(coverTimer2);
       res.end();
     } catch (err) { console.error('[Cover]', err); res.writeHead(500); res.end(); }
     return;
@@ -4166,7 +4332,18 @@ const server = http.createServer(async (req, res) => {
       if (!audioUrl) { res.writeHead(400); res.end('Missing url'); return; }
       const range = req.headers.range || '';
       const hdr = audioProxyHeadersFor(audioUrl, range);
-      const up = await fetch(audioUrl, { headers: hdr });
+      // Add timeout via AbortController to prevent hanging
+      const ac = new AbortController();
+      const fetchTimer = setTimeout(function() { ac.abort(); }, 20000);
+      let up;
+      try {
+        up = await fetch(audioUrl, { headers: hdr, signal: ac.signal });
+      } catch (fetchErr) {
+        clearTimeout(fetchTimer);
+        if (fetchErr.name === 'AbortError') throw new Error('Audio upstream timeout');
+        throw fetchErr;
+      }
+      clearTimeout(fetchTimer);
       const out = {
         'Content-Type': audioContentTypeForUrl(audioUrl, up.headers.get('content-type')),
         'Access-Control-Allow-Origin': '*',
@@ -4176,9 +4353,181 @@ const server = http.createServer(async (req, res) => {
       const cr = up.headers.get('content-range');  if (cr) out['Content-Range']  = cr;
       res.writeHead(up.status, out);
       const reader = up.body.getReader();
-      while (true) { const c = await reader.read(); if (c.done) break; res.write(c.value); }
+      var streamEnded = false;
+      var streamTimer = setTimeout(function() {
+        if (!streamEnded) { streamEnded = true; try { reader.cancel(); } catch(e) {} }
+      }, 30000);
+      var streamedBytes = 0;
+      try {
+        while (true) {
+          const c = await reader.read();
+          if (c.done) { streamEnded = true; break; }
+          res.write(c.value);
+          streamedBytes += c.value.length;
+          // Yield to event loop every 256KB to prevent starving other requests
+          if (streamedBytes > 262144) {
+            streamedBytes = 0;
+            await new Promise(function(r) { setImmediate(r); });
+          }
+        }
+      } catch (streamErr) {
+        if (!streamEnded) { streamEnded = true; console.error('[Audio] Stream error:', streamErr.message); }
+      }
+      clearTimeout(streamTimer);
       res.end();
     } catch (err) { console.error('[Audio]', err); res.writeHead(500); res.end(); }
+    return;
+  }
+
+  // ---------- LX source engine API ----------
+
+  if (pn === '/api/lx/import') {
+    try {
+      var lxBody = await readRequestBody(req);
+      var importUrl = (lxBody && lxBody.url) || '';
+      if (!importUrl || !/^https?:\/\//i.test(importUrl)) {
+        sendJSON(res, { error: 'Invalid URL' }, 400);
+        return;
+      }
+      var entry = await lxEngine.importSource(importUrl);
+      sendJSON(res, { ok: true, source: entry });
+    } catch (err) {
+      console.error('[LX Import]', err.message);
+      sendJSON(res, { ok: false, error: err.message }, 500);
+    }
+    return;
+  }
+
+  if (pn === '/api/lx/import-local') {
+    try {
+      var lxLocalBody = await readRequestBody(req);
+      var localPath = (lxLocalBody && lxLocalBody.filePath) || '';
+      if (!localPath) {
+        sendJSON(res, { error: 'Missing filePath' }, 400);
+        return;
+      }
+      var localEntry = await lxEngine.importLocalFile(localPath);
+      sendJSON(res, { ok: true, source: localEntry });
+    } catch (err) {
+      console.error('[LX Import Local]', err.message);
+      sendJSON(res, { ok: false, error: err.message }, 500);
+    }
+    return;
+  }
+
+  if (pn === '/api/lx/sources') {
+    sendJSON(res, { sources: lxEngine.getSources() });
+    return;
+  }
+
+  if (pn === '/api/lx/set-active') {
+    try {
+      var lxSetBody = await readRequestBody(req);
+      lxEngine.setActiveSource(lxSetBody.activeId, lxSetBody.enabled);
+      sendJSON(res, { ok: true, status: lxEngine.getStatus() });
+    } catch (err) {
+      sendJSON(res, { ok: false, error: err.message }, 500);
+    }
+    return;
+  }
+
+  if (pn === '/api/lx/status') {
+    sendJSON(res, lxEngine.getStatus());
+    return;
+  }
+
+  if (pn === '/api/lx/search') {
+    try {
+      var lxKw = url.searchParams.get('keywords') || '';
+      var lxSrc = url.searchParams.get('source') || '';
+      var lxLimit = parseInt(url.searchParams.get('limit') || '20', 10) || 20;
+      if (!lxKw) { sendJSON(res, { error: 'Missing keywords' }, 400); return; }
+      var active = lxEngine.getActiveSource();
+      var sourceList = active ? Object.keys(active.sources) : [];
+      var lxSearchResult;
+      if (lxSrc && lxSearch.SEARCHERS[lxSrc]) {
+        lxSearchResult = await lxSearch.searchBySource(lxSrc, lxKw, lxLimit);
+      } else {
+        lxSearchResult = await lxSearch.searchAll(lxKw, sourceList, lxLimit);
+      }
+      sendJSON(res, lxSearchResult);
+    } catch (err) {
+      console.error('[LX Search]', err.message);
+      sendJSON(res, { error: err.message, songs: [] }, 500);
+    }
+    return;
+  }
+
+  if (pn === '/api/lx/song/url') {
+    try {
+      var lxSource = url.searchParams.get('source') || 'wy';
+      var lxSongId = url.searchParams.get('songId') || url.searchParams.get('id') || '';
+      var lxQuality = url.searchParams.get('quality') || '320k';
+      var lxHash = url.searchParams.get('hash') || '';
+      if (!lxSongId) { sendJSON(res, { error: 'Missing songId' }, 400); return; }
+      // Build musicInfo matching lx-music-desktop toOldMusicInfo format
+      // Some source scripts (e.g. juhe) need full metadata beyond just songmid
+      // The 'source' field inside musicInfo is critical — juhe validates it
+      var lxCopyrightId = url.searchParams.get('copyrightId') || '';
+      var musicInfo = { songmid: lxSongId, source: lxSource };
+      if (lxHash) musicInfo.hash = lxHash;
+      if (lxCopyrightId) musicInfo.copyrightId = lxCopyrightId;
+      var lxName = url.searchParams.get('name') || '';
+      var lxSinger = url.searchParams.get('singer') || '';
+      var lxInterval = url.searchParams.get('interval') || '';
+      var lxAlbum = url.searchParams.get('album') || '';
+      var lxImg = url.searchParams.get('img') || '';
+      if (lxName) musicInfo.name = lxName;
+      if (lxSinger) musicInfo.singer = lxSinger;
+      if (lxInterval) musicInfo.interval = lxInterval;
+      if (lxAlbum) musicInfo.albumName = lxAlbum;
+      if (lxImg) musicInfo.img = lxImg;
+      // Map Mineradio quality names (hires/lossless/exhigh/standard) to LX source quality names (320k/128k/flac/etc)
+      var qualitiesToTry = mapLxQuality(lxQuality, lxSource);
+      var lxUrlResult = null;
+      for (var qi = 0; qi < qualitiesToTry.length; qi++) {
+        try {
+          lxUrlResult = await lxEngine.handleAction('musicUrl', lxSource, {
+            musicInfo: musicInfo,
+            type: qualitiesToTry[qi],
+          });
+          if (lxUrlResult) { lxQuality = qualitiesToTry[qi]; break; }
+        } catch (e) {
+          if (qi === qualitiesToTry.length - 1) throw e;
+          console.log('[LX SongUrl] quality ' + qualitiesToTry[qi] + ' failed, trying next...');
+        }
+      }
+      sendJSON(res, { provider: lxSource, url: lxUrlResult, playable: !!lxUrlResult, quality: lxQuality });
+    } catch (err) {
+      console.error('[LX SongUrl]', err.message);
+      sendJSON(res, { provider: lxSource || 'unknown', url: '', playable: false, error: err.message }, 500);
+    }
+    return;
+  }
+
+  if (pn === '/api/lx/refresh') {
+    try {
+      var lxRefBody = await readRequestBody(req);
+      var refreshId = (lxRefBody && lxRefBody.id) || '';
+      var refreshed = await lxEngine.refreshSource(refreshId);
+      sendJSON(res, { ok: true, source: refreshed });
+    } catch (err) {
+      console.error('[LX Refresh]', err.message);
+      sendJSON(res, { ok: false, error: err.message }, 500);
+    }
+    return;
+  }
+
+  if (pn === '/api/lx/delete') {
+    try {
+      var lxDelBody = await readRequestBody(req);
+      var deleteId = (lxDelBody && lxDelBody.id) || '';
+      await lxEngine.removeSource(deleteId);
+      sendJSON(res, { ok: true });
+    } catch (err) {
+      console.error('[LX Delete]', err.message);
+      sendJSON(res, { ok: false, error: err.message }, 500);
+    }
     return;
   }
 
@@ -4191,6 +4540,13 @@ const server = http.createServer(async (req, res) => {
   let filePath = pn === '/' ? '/index.html' : pn;
   filePath = path.join(__dirname, 'public', filePath);
   serveStatic(res, filePath);
+});
+
+// Load LX sources on startup
+lxEngine.loadAllSources().then(function(entries) {
+  console.log('[LX] Loaded ' + entries.length + ' source(s)');
+}).catch(function(err) {
+  console.error('[LX] Failed to load sources:', err.message);
 });
 
 server.listen(PORT, HOST, () => {

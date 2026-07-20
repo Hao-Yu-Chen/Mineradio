@@ -45,3 +45,4 @@ tmp/
 *.png.tmp
 verification/
 screenshots/
+.lx-sources/
