@@ -1,5 +1,12 @@
 # Changelog
 
+## v2.0.0
+
+- 全面优化视觉层次与动态表现，整体观感更统一。
+- 桌面模式与全屏交互更自然，桌面使用体验更完整。
+- 重整主页与搜索体验，推荐、历史和长列表浏览更顺手。
+- 修复连续播放与切歌稳定性问题，并优化启动和后台性能。
+
 ## v1.1.1
 
 - P0 installer safety fix: installation now defaults to the first available non-C drive from `D:\Mineradio` through `Z:\Mineradio`; it falls back to `C:\Mineradio` only when no D-Z drive exists.
