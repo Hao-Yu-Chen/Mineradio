@@ -157,6 +157,8 @@ body.splash-active.splash-revealing #top-right{opacity:1;transition:opacity 1100
 #search-area{--search-offset:0px;position:fixed;z-index:10;top:-76px;left:50%;transform:translateX(calc(-50% + var(--search-offset)));width:auto;display:flex;align-items:flex-start;gap:12px;transition:top .45s cubic-bezier(.2,.7,.2,1),opacity .35s,transform .35s cubic-bezier(.2,.7,.2,1);opacity:0;pointer-events:none}
 #search-area.has-cover-action{--search-offset:0px}
 #search-area.peek{top:24px;opacity:1;pointer-events:auto}
+body.search-auto-hide-disabled #search-area{top:24px;opacity:1;pointer-events:auto}
+body.search-auto-hide-disabled #search-area.stage-mode{top:18px}
 #search-area.stage-mode #search-stack{width:min(360px,52vw)}
 #search-area.stage-mode.peek{top:18px}
 #search-stack{width:min(520px,58vw)}
@@ -2507,6 +2509,8 @@ html.control-glass-svg-ok #visual-guide-btn:hover{
         <span id="volume-value">100%</span>
       </div>
     </div>
+    <button id="search-hide-btn" class="ctrl-btn active" onclick="toggleSearchAutoHide(event)" title="搜索栏自动隐藏：开"><svg width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.35-4.35"/></svg></button>
+    <button id="top-right-hide-btn" class="ctrl-btn" onclick="toggleTopRightAutoHide(event)" title="Home/DIY/登录自动隐藏：关"><svg width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M3 10.8 12 3l9 7.8"/><path d="M5 10v10h14V10"/></svg></button>
     <button id="controls-hide-btn" class="ctrl-btn active" onclick="toggleControlsAutoHide()" title="控制条自动隐藏"><svg width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M5 8h14"/><path d="M8 12h8"/><path d="M10 16h4"/></svg></button>
     <button id="immersive-btn" class="ctrl-btn" onclick="toggleImmersiveMode()" title="全沉浸式" aria-label="全沉浸式" aria-pressed="false"><svg width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.9" viewBox="0 0 24 24"><path d="M4 9V5a1 1 0 0 1 1-1h4"/><path d="M15 4h4a1 1 0 0 1 1 1v4"/><path d="M20 15v4a1 1 0 0 1-1 1h-4"/><path d="M9 20H5a1 1 0 0 1-1-1v-4"/><circle cx="12" cy="12" r="2.2"/></svg></button>
     <button class="ctrl-btn fullscreen-toggle-btn" onclick="toggleFullscreen()" title="全屏 (F)"><svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 7V3h4"/><path d="M21 7V3h-4"/><path d="M3 17v4h4"/><path d="M21 17v4h-4"/></svg></button>
@@ -2784,6 +2788,8 @@ var PLAYLIST_PANEL_PIN_STORE_KEY = 'mineradio-playlist-panel-pinned-v1';
 var USER_CAPSULE_AUTO_HIDE_STORE_KEY = 'mineradio-user-capsule-auto-hide-v1';
 var FX_FAB_AUTO_HIDE_STORE_KEY = 'mineradio-fx-fab-auto-hide-v1';
 var CONTROLS_AUTO_HIDE_STORE_KEY = 'mineradio-controls-auto-hide-v1';
+var SEARCH_AUTO_HIDE_STORE_KEY = 'mineradio-search-auto-hide-v1';
+var TOP_RIGHT_AUTO_HIDE_STORE_KEY = 'mineradio-top-right-auto-hide-v1';
 var FREE_CAMERA_STORE_KEY = 'mineradio-free-camera-v1';
 var HOTKEY_SETTINGS_STORE_KEY = 'mineradio-hotkey-settings-v1';
 var VISUAL_GUIDE_SEEN_STORE_KEY = 'mineradio-visual-guide-seen-v2';
@@ -3070,9 +3076,48 @@ function applyUserCapsuleAutoHideState() {
 function toggleUserCapsuleAutoHide(e) {
   if (e && e.stopPropagation) e.stopPropagation();
   userCapsuleAutoHide = !userCapsuleAutoHide;
+  topRightAutoHide = userCapsuleAutoHide;
   saveBooleanPreference(USER_CAPSULE_AUTO_HIDE_STORE_KEY, userCapsuleAutoHide);
+  saveBooleanPreference(TOP_RIGHT_AUTO_HIDE_STORE_KEY, topRightAutoHide);
   applyUserCapsuleAutoHideState();
+  applyTopRightAutoHideState();
   showToast(userCapsuleAutoHide ? '账号胶囊已自动隐藏' : '账号胶囊已固定显示');
+}
+// ── 搜索栏自动隐藏开关（默认开启）──
+function applySearchAutoHideState() {
+  document.body.classList.toggle('search-auto-hide-disabled', !searchAutoHide);
+  var btn = document.getElementById('search-hide-btn');
+  if (btn) {
+    btn.classList.toggle('active', searchAutoHide);
+    btn.title = searchAutoHide ? '搜索栏自动隐藏：开' : '搜索栏自动隐藏：关';
+  }
+}
+function toggleSearchAutoHide(e) {
+  if (e && e.stopPropagation) e.stopPropagation();
+  searchAutoHide = !searchAutoHide;
+  saveBooleanPreference(SEARCH_AUTO_HIDE_STORE_KEY, searchAutoHide);
+  applySearchAutoHideState();
+  showToast(searchAutoHide ? '搜索栏自动隐藏已开启' : '搜索栏已固定显示');
+}
+// ── 顶部按钮（Home/DIY/登录）自动隐藏开关（默认关闭）──
+function applyTopRightAutoHideState() {
+  // Reuse the existing user-capsule-auto-hide mechanism
+  userCapsuleAutoHide = topRightAutoHide;
+  applyUserCapsuleAutoHideState();
+  var btn = document.getElementById('top-right-hide-btn');
+  if (btn) {
+    btn.classList.toggle('active', topRightAutoHide);
+    btn.title = topRightAutoHide ? 'Home/DIY/登录自动隐藏：开' : 'Home/DIY/登录自动隐藏：关';
+  }
+}
+function toggleTopRightAutoHide(e) {
+  if (e && e.stopPropagation) e.stopPropagation();
+  topRightAutoHide = !topRightAutoHide;
+  userCapsuleAutoHide = topRightAutoHide;
+  saveBooleanPreference(TOP_RIGHT_AUTO_HIDE_STORE_KEY, topRightAutoHide);
+  saveBooleanPreference(USER_CAPSULE_AUTO_HIDE_STORE_KEY, topRightAutoHide);
+  applyTopRightAutoHideState();
+  showToast(topRightAutoHide ? 'Home/DIY/登录按钮已自动隐藏' : 'Home/DIY/登录按钮已固定显示');
 }
 function updateUserCapsuleAutoHideFromPointer(x, y) {
   if (!userCapsuleAutoHide || immersiveMode) {
@@ -3574,6 +3619,8 @@ var fxPanelPinned = false;
 var playlistPanelPinned = readBooleanPreference(PLAYLIST_PANEL_PIN_STORE_KEY, false);
 var userCapsuleAutoHide = readBooleanPreference(USER_CAPSULE_AUTO_HIDE_STORE_KEY, false);
 var fxFabAutoHide = readBooleanPreference(FX_FAB_AUTO_HIDE_STORE_KEY, false);
+var searchAutoHide = readBooleanPreference(SEARCH_AUTO_HIDE_STORE_KEY, true);
+var topRightAutoHide = readBooleanPreference(TOP_RIGHT_AUTO_HIDE_STORE_KEY, false);
 var fxFabAutoHideRevealArmed = true;
 var hotkeySettings = readHotkeySettings();
 var immersiveMode = false;
@@ -23157,6 +23204,13 @@ function updateLxUI() {
           fx.lxSourceEnabled = false;
           saveLyricLayout();
         }
+        // Always sync active source ID from server when available —
+        // the server is the source of truth and may have auto-selected
+        // a source during cold start.
+        if (status.enabled && status.activeId && status.activeId !== fx.lxActiveSourceId) {
+          fx.lxActiveSourceId = status.activeId;
+          saveLyricLayout();
+        }
       }
       var modeSeg = document.getElementById('lx-mode-seg');
       if (modeSeg) {
@@ -26376,8 +26430,10 @@ window.addEventListener('mousemove', function(e){
   var uploadTip = document.getElementById('upload-tip');
   var uploadTipOpen = !!(uploadTip && uploadTip.classList.contains('show'));
   var inSearchPanel = saOn && ex >= saRect.left - 24 && ex <= saRect.right + 24 && ey >= saRect.top - 22 && ey <= saRect.bottom + 42;
-  if (ey < 66 || inSearchPanel || searchFocused || uploadTipOpen) setPeek(sa, true, 'search');
-  else if (saOn && !emptyHomeActive) setPeek(sa, false, 'search');
+  if (searchAutoHide) {
+    if (ey < 66 || inSearchPanel || searchFocused || uploadTipOpen) setPeek(sa, true, 'search');
+    else if (saOn && !emptyHomeActive) setPeek(sa, false, 'search');
+  }
   // 控制台: 右下角触发；一旦面板出现，就按真实面板矩形保留显示
   var fpOn = fp.classList.contains('peek') || fp.classList.contains('show');
   var fpRect = fp.getBoundingClientRect();
@@ -27419,7 +27475,8 @@ scheduleUiWarmTask(function(){
     if (renderer && renderer.compile && scene && camera) renderer.compile(scene, camera);
   } catch (e) {}
 }, 900);
-applyUserCapsuleAutoHideState();
+applySearchAutoHideState();
+applyTopRightAutoHideState();
 applyFxFabAutoHideState();
 applyControlsAutoHidePreference();
 applyDesktopLyricsState(false);

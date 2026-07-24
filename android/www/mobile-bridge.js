@@ -91,6 +91,7 @@
   var _statusServer = '...';
   var _statusCanvas = '';
   var _statusFailAt = 0;
+  var _lxUiRetried = false;
 
   function showStatus(msg, color) {
     var el = document.getElementById('_m_status');
@@ -109,9 +110,17 @@
   // ── Server health check ──
   function check() {
     fetch(S + '/api/app/version').then(function(r) { return r.json(); }).then(function(d) {
+      var wasDown = _statusFailAt > 0;
       _statusServer = 'SVR: v' + d.version + ' OK';
       _statusFailAt = 0;
       showStatus('__hide__', '#0f0');
+      // On Android cold start, updateLxUI() runs before the Node.js server is
+      // ready, so imported LX sources don't appear until the user toggles mode.
+      // Retry once after the server becomes available.
+      if (!_lxUiRetried && typeof updateLxUI === 'function') {
+        _lxUiRetried = true;
+        updateLxUI();
+      }
     }).catch(function(e) {
       if (!_statusFailAt) _statusFailAt = Date.now();
       if (Date.now() - _statusFailAt > 30000) {
