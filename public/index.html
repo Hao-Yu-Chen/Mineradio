@@ -7923,15 +7923,13 @@ function restoreQueueState() {
     if (!state.queue || !state.queue.length) return false;
     playQueue = state.queue.map(function(s) { return hydrateCustomCover(s); });
     currentIdx = Math.max(0, Math.min(state.idx || 0, playQueue.length - 1));
-    safeRenderQueuePanel('restore-queue', { scrollCurrent: miniQueueOpen });
-    safeShelfRebuild('restore-queue');
     return true;
   } catch(e) { return false; }
 }
-// 在 beforeunload/pagehide 中保存队列 + 定时保存
+// 定时保存队列（即使队列为空也保存，确保删除/清空被持久化）
 window.addEventListener('beforeunload', saveQueueState);
 window.addEventListener('pagehide', saveQueueState);
-setInterval(function() { if (playQueue.length > 0) saveQueueState(); }, 10000);
+setInterval(function() { saveQueueState(); }, 10000);
 
 function normalizeHexColor(value, fallback) {
   var hex = String(value || '').trim();
@@ -10118,8 +10116,11 @@ function applyCoverCanvas(cv, thumbSrc, opts) {
   }
 
   if (thumbSrc) {
-    document.getElementById('thumb-cover').src = thumbSrc;
-    setControlCoverSrc(thumbSrc);
+    // On Android, relative /api/ URLs must be resolved to the local server
+    var _resolved = thumbSrc;
+    try { if (typeof desktopWindow !== 'undefined' && desktopWindow && desktopWindow.isMobile && thumbSrc.indexOf('/api/') === 0) _resolved = 'http://127.0.0.1:3000' + thumbSrc; } catch(e) {}
+    document.getElementById('thumb-cover').src = _resolved;
+    setControlCoverSrc(_resolved);
   }
   if (shelfManager) shelfManager.onCoverChange(thumbSrc);
 
@@ -19105,6 +19106,7 @@ function shuffleQueue() {
 }
 function clearQueue() {
   playQueue = []; currentIdx = -1;
+  saveQueueState();
   safeRenderQueuePanel('clear-queue');
   safeShelfRebuild('clear-queue');
   updateCustomCoverButton();
@@ -19115,6 +19117,7 @@ function removeFromQueue(idx) {
   if (idx < 0 || idx >= playQueue.length) return;
   playQueue.splice(idx, 1);
   if (currentIdx >= playQueue.length) currentIdx = playQueue.length - 1;
+  saveQueueState();
   safeRenderQueuePanel('remove-queue-item');
   safeShelfRebuild('remove-queue-item');
   updateCustomCoverButton();
@@ -19849,14 +19852,16 @@ function renderQueuePanel(opts) {
   opts = opts || {};
   var $ql = document.getElementById('queue-list');
   var seq = ++queueRenderSeq;
-  if (!playQueue.length) {
+  // Skip internal stub entry used for particle init warmup
+  var _visibleSongs = playQueue.filter(function(s){ return !s.id || s.id !== '__stub__'; });
+  if (!_visibleSongs.length) {
     $ql.innerHTML = '<div style="text-align:center;padding:24px 0;color:rgba(255,255,255,.32);font-size:11.5px">队列为空，搜索后点 + 设为下一首</div>';
     renderMiniQueuePanel();
     var panel = document.getElementById('playlist-panel');
     if (panel && (panel.classList.contains('show') || panel.classList.contains('peek')) && queueViewTab === 'queue') switchPlaylistTab('playlists');
     return;
   }
-  $ql.innerHTML = playQueue.map(function(song, i){
+  $ql.innerHTML = _visibleSongs.map(function(song, i){
     var thumb = songCoverSrc(song, 60);
     var imgTag = thumb ? '<img src="' + thumb + '" alt="" loading="lazy" decoding="async" onerror="this.style.opacity=0.2">' : '<div style="width:38px;height:38px;border-radius:6px;background:rgba(255,255,255,.06);flex-shrink:0"></div>';
     return '<div class="queue-item' + (i === currentIdx ? ' now' : '') + '" onclick="playQueueAt(' + i + ')">' +
@@ -22920,7 +22925,10 @@ function fetchLxStatus() {
     return d;
   }).catch(function(err) {
     console.error('[lx] fetch status error:', err);
-    return { enabled: false, sourceCount: 0, sources: [] };
+    // Preserve current frontend state on network error so the user's
+    // saved LX mode preference isn't overwritten when the server is
+    // temporarily unreachable (e.g. during Android cold start).
+    return { enabled: !!fx.lxSourceEnabled, sourceCount: 0, sources: [], _error: true };
   });
 }
 
@@ -23137,14 +23145,18 @@ function updateLxUI() {
   }
   fetchLxSources().then(function(sources) {
     fetchLxStatus().then(function(status) {
-      // Sync frontend state with server state on first load
-      if (status.enabled && !fx.lxSourceEnabled) {
-        fx.lxSourceEnabled = true;
-        fx.lxActiveSourceId = status.activeId;
-        saveLyricLayout();
-      } else if (!status.enabled && fx.lxSourceEnabled) {
-        fx.lxSourceEnabled = false;
-        saveLyricLayout();
+      // Sync frontend state with server state on first load.
+      // Skip sync when the server response came from a network error
+      // (_error flag) — don't overwrite the user's saved preference.
+      if (!status._error) {
+        if (status.enabled && !fx.lxSourceEnabled) {
+          fx.lxSourceEnabled = true;
+          fx.lxActiveSourceId = status.activeId;
+          saveLyricLayout();
+        } else if (!status.enabled && fx.lxSourceEnabled) {
+          fx.lxSourceEnabled = false;
+          saveLyricLayout();
+        }
       }
       var modeSeg = document.getElementById('lx-mode-seg');
       if (modeSeg) {
@@ -27414,7 +27426,6 @@ applyDesktopLyricsState(false);
 applyWallpaperModeState(false);
 setShelfMode(fx.shelf);
 applyStartupStarfieldPreset();
-restoreQueueState();
 applyPlaylistPanelPinState(false);
 if (fx.floatLayer) createFloatLayer();
 if (fx.particleLyrics) createLyricsParticles();
@@ -27453,6 +27464,29 @@ if (customLyricInput) {
   });
 }
 safeRenderQueuePanel('startup');
+if (restoreQueueState()) safeRenderQueuePanel('restore-queue', { scrollCurrent: miniQueueOpen });
+// If queue is empty after restore, the particle system fails to initialise.
+// A non-empty queue with currentIdx>=0 is required for the GPU pipeline to
+// warm up (the exact dependency is deep in the render/cover-load chain).
+// Inject a temporary stub entry, then clean up after a few frames.
+var _startupQueueEmpty = !playQueue.length;
+if (_startupQueueEmpty) {
+  // Stub: a minimal valid song entry that warms up the GPU pipeline.
+  // The particle system requires currentIdx>=0 + playQueue.length>0
+  // for proper WebGL shader initialisation (root cause unknown but
+  // empirically confirmed). The stub is invisible in all queue UIs
+  // and is removed after a few render frames.
+  playQueue = [{ name: '​', artist: '​', id: '__stub__', source: '', cover: '' }];
+  currentIdx = 0;
+  var _stubCleanup = function(ticks) {
+    if (ticks > 0) { requestAnimationFrame(function(){ _stubCleanup(ticks - 1); }); return; }
+    if (playQueue.length === 1 && playQueue[0] && playQueue[0].id === '__stub__') {
+      playQueue = []; currentIdx = -1;
+      safeRenderQueuePanel('cleanup-stub');
+    }
+  };
+  requestAnimationFrame(function(){ _stubCleanup(5); });
+}
 updateCustomCoverButton();
 updateCustomLyricControls();
 updateLikeButtons();

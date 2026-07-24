@@ -1,0 +1,183 @@
+/**
+ * Mineradio Mobile Bridge
+ * Fixes: API routing, desktopWindow shim, DIY button, white block
+ */
+(function() {
+  'use strict';
+
+  var noop = function() {};
+  var asyncNoop = async function() { return {}; };
+  var SERVER_BASE = 'http://127.0.0.1:3000';
+
+  // ── Fix 1: API routing ──
+  // When loaded from file:// or capacitor://, relative /api/* calls fail.
+  // Intercept fetch to route them to the local Node.js server.
+  (function patchFetch() {
+    var _fetch = window.fetch;
+    window.fetch = function(url, options) {
+      if (typeof url === 'string') {
+        if (url.startsWith('/api/') || url.startsWith('/vendor/')) {
+          url = SERVER_BASE + url;
+        }
+      } else if (url instanceof Request && typeof url.url === 'string') {
+        if (url.url.startsWith('/api/') || url.url.startsWith('/vendor/')) {
+          url = new Request(SERVER_BASE + url.url, url);
+        }
+      }
+      return _fetch.call(window, url, options);
+    };
+  })();
+
+  // ── Fix 2: Desktop Window API shim ──
+  window.desktopWindow = {
+    isDesktop: false,
+    isMobile: true,
+
+    minimize: asyncNoop,
+    toggleMaximize: asyncNoop,
+    toggleFullscreen: async function() {
+      try {
+        if (document.fullscreenElement) {
+          await document.exitFullscreen();
+        } else {
+          await document.documentElement.requestFullscreen();
+        }
+      } catch(e) {}
+    },
+    exitFullscreenWindowed: async function() {
+      try { await document.exitFullscreen(); } catch(e) {}
+    },
+    getState: async function() {
+      return { isMaximized: false, isFullscreen: !!document.fullscreenElement, isFocused: true, isVisible: true };
+    },
+    close: noop,
+
+    openNeteaseMusicLogin: async function() { return { ok: false, reason: 'use_qr_login' }; },
+    clearNeteaseMusicLogin: asyncNoop,
+    openQQMusicLogin: async function() { return { ok: false, reason: 'use_qr_login' }; },
+    clearQQMusicLogin: asyncNoop,
+
+    exportJsonFile: async function(payload) {
+      var data = payload && payload.data ? payload.data : payload;
+      var name = (payload && payload.name) || 'mineradio-export';
+      var blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url; a.download = name + '.json';
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+      return { ok: true };
+    },
+    importJsonFile: async function() {
+      return new Promise(function(resolve) {
+        var input = document.createElement('input');
+        input.type = 'file'; input.accept = '.json';
+        input.onchange = function() {
+          var file = input.files[0];
+          if (!file) { resolve({ ok: false, error: 'no_file' }); return; }
+          var reader = new FileReader();
+          reader.onload = function() {
+            try { resolve({ ok: true, data: JSON.parse(reader.result) }); }
+            catch(e) { resolve({ ok: false, error: 'parse_error' }); }
+          };
+          reader.readAsText(file);
+        };
+        input.click();
+      });
+    },
+
+    openUpdateInstaller: asyncNoop,
+    restartApp: asyncNoop,
+
+    configureGlobalHotkeys: async function() { return { ok: true, results: [] }; },
+    onGlobalHotkey: function() { return noop; },
+
+    setDesktopLyricsEnabled: asyncNoop,
+    updateDesktopLyrics: asyncNoop,
+    onDesktopLyricsLockState: function() { return noop; },
+    onDesktopLyricsEnabledState: function() { return noop; },
+
+    setWallpaperMode: asyncNoop,
+    updateWallpaperMode: asyncNoop,
+
+    onStateChange: function(cb) {
+      if (typeof cb === 'function') {
+        cb({ isFocused: true, isVisible: true, isMaximized: false, isFullscreen: false });
+      }
+      return noop;
+    },
+  };
+
+  // ── Fix 3: Add DIY button (right after home-btn) ──
+  function injectDiyButton() {
+    var homeBtn = document.getElementById('home-btn');
+    if (!homeBtn) return;
+    if (document.getElementById('mobile-diy-btn')) return; // already injected
+
+    var diyBtn = document.createElement('button');
+    diyBtn.id = 'mobile-diy-btn';
+    diyBtn.className = 'icon-btn';
+    diyBtn.title = 'DIY 视觉控制台';
+    diyBtn.setAttribute('aria-label', 'DIY');
+    diyBtn.innerHTML = '<svg width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.9" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 1v4"/><path d="M12 19v4"/><path d="M4.2 4.2l2.8 2.8"/><path d="M17 17l2.8 2.8"/><path d="M1 12h4"/><path d="M19 12h4"/><path d="M4.2 19.8l2.8-2.8"/><path d="M17 7l2.8-2.8"/></svg>';
+    diyBtn.onclick = function(e) {
+      e.preventDefault(); e.stopPropagation();
+      var fxFab = document.getElementById('fx-fab');
+      if (fxFab) fxFab.click();
+    };
+    diyBtn.style.cssText = 'width:44px;min-width:44px;height:44px;border:1px solid rgba(255,255,255,.12);border-radius:14px;background:rgba(0,0,0,.35);color:rgba(232,236,239,.78);cursor:pointer;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);transition:all .18s';
+
+    homeBtn.parentNode.insertBefore(diyBtn, homeBtn.nextSibling);
+
+    // Hover effect
+    diyBtn.addEventListener('pointerenter', function() {
+      this.style.borderColor = 'rgba(0,245,212,.44)';
+      this.style.background = 'rgba(0,245,212,.075)';
+      this.style.color = '#fff';
+      this.style.boxShadow = '0 14px 38px rgba(0,245,212,.08)';
+    });
+    diyBtn.addEventListener('pointerleave', function() {
+      this.style.borderColor = 'rgba(255,255,255,.12)';
+      this.style.background = 'rgba(0,0,0,.35)';
+      this.style.color = 'rgba(232,236,239,.78)';
+      this.style.boxShadow = 'none';
+    });
+  }
+
+  // ── Fix 4: Remove white block behind home button ──
+  function fixWhiteBlock() {
+    // The white block is caused by #user-capsule-hide-btn or icon-btn backgrounds
+    // on mobile where backdrop-filter may not render correctly
+    var style = document.createElement('style');
+    style.id = 'mobile-patches';
+    style.textContent = [
+      /* Fix white block ~175px behind home button */
+      '#user-capsule-hide-btn { background: transparent !important; }',
+      '#top-right .icon-btn { background: rgba(0,0,0,.35) !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }',
+      /* Ensure home and DIY buttons are visible */
+      '#home-btn, #mobile-diy-btn { background: rgba(0,0,0,.35) !important; }',
+      '#home-btn:hover, #mobile-diy-btn:hover { background: rgba(0,245,212,.075) !important; }',
+      /* Fix user capsule button */
+      '#user-btn { background: rgba(0,0,0,.35) !important; }',
+      '#user-btn:hover { background: rgba(0,245,212,.075) !important; }',
+    ].join('\n');
+    document.head.appendChild(style);
+  }
+
+  // ── Initialize on DOM ready ──
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function() {
+      document.body && document.body.classList.add('mobile-app');
+      document.documentElement.classList.add('mobile-shell');
+      injectDiyButton();
+      fixWhiteBlock();
+    });
+  } else {
+    document.body && document.body.classList.add('mobile-app');
+    document.documentElement.classList.add('mobile-shell');
+    injectDiyButton();
+    fixWhiteBlock();
+  }
+
+  console.log('[Mineradio Mobile] Bridge initialized, API: ' + SERVER_BASE);
+})();

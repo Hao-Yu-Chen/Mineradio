@@ -45,4 +45,18 @@ tmp/
 *.png.tmp
 verification/
 screenshots/
+!docs/screenshots/
 .lx-sources/
+
+# Android build outputs
+android/node_modules/
+android/android/app/build/
+android/android/build/
+android/android/.gradle/
+android/android/local.properties
+android/*.apk
+android/www/nodejs-project/node_modules/
+android/www/nodejs-project/package-lock.json
+.superpowers/
+lx-music-desktop/
+*.apk

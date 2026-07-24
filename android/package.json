@@ -1,0 +1,22 @@
+{
+  "name": "mineradio-android",
+  "version": "1.1.1",
+  "description": "Mineradio Android App",
+  "private": true,
+  "scripts": {
+    "cap:add": "npx cap add android",
+    "cap:sync": "npx cap sync android",
+    "cap:open": "npx cap open android",
+    "build:apk": "bash build-apk.sh"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.2.0",
+    "@capacitor/app": "^6.0.2",
+    "@capacitor/cli": "^6.2.0",
+    "@capacitor/core": "^6.2.0",
+    "@capacitor/filesystem": "^6.0.2"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "appId": "com.mineradio.app",
+  "appName": "Mineradio",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "http",
+    "allowNavigation": ["*"]
+  },
+  "android": {
+    "allowMixedContent": true
+  }
+}

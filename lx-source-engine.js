@@ -476,6 +476,19 @@ function getSources() {
 var activeSourceId = null;
 var lxEnabled = false;
 
+// Synchronously restore LX state from disk at module load time.
+// This must happen before server.listen() so that /api/lx/status
+// returns the correct state immediately, preventing updateLxUI()
+// from incorrectly overwriting the user's saved preference on
+// cold start (especially Android where the race condition is tight).
+try {
+  if (fs.existsSync(STATE_FILE)) {
+    var _initState = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
+    lxEnabled = !!_initState.enabled;
+    activeSourceId = _initState.activeId || null;
+  }
+} catch (e) {}
+
 function setActiveSource(id, enabled) {
   var switched = false;
   if (id !== undefined && id !== activeSourceId) { activeSourceId = id; switched = true; }
