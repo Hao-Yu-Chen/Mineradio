@@ -48,6 +48,7 @@ function jsCheckFiles() {
     if (file.endsWith('.js')) files.push(file);
   });
   addIfExists(path.join(appRoot, 'server.js'));
+  addIfExists(path.join(appRoot, 'qq-vip-api.js'));
   addIfExists(path.join(appRoot, 'dj-analyzer.js'));
   walk(path.join(appRoot, 'cuefield')).forEach(file => {
     if (file.endsWith('.js')) files.push(file);
@@ -85,6 +86,36 @@ function runPlaybackAudioGraphRegressionCheck() {
     process.stdout.write(result.stdout || '');
     process.stderr.write(result.stderr || '');
     fail(`playback audio graph regression failed: ${rel(testFile)}`);
+  }
+  process.stdout.write(result.stdout || '');
+}
+
+function runPlaybackSourceFallbackTransactionCheck() {
+  logStep('Playback source fallback finite transaction regression');
+  const testFile = path.join(appRoot, 'tests', 'playback-source-fallback-transaction.test.js');
+  const result = spawnSync(process.execPath, [testFile], {
+    cwd: appRoot,
+    encoding: 'utf8'
+  });
+  if (result.status !== 0) {
+    process.stdout.write(result.stdout || '');
+    process.stderr.write(result.stderr || '');
+    fail(`playback source fallback transaction regression failed: ${rel(testFile)}`);
+  }
+  process.stdout.write(result.stdout || '');
+}
+
+function runQQVipEntitlementRegressionCheck() {
+  logStep('QQ VIP entitlement regression');
+  const testFile = path.join(appRoot, 'tests', 'qq-vip-entitlement.test.js');
+  const result = spawnSync(process.execPath, [testFile], {
+    cwd: appRoot,
+    encoding: 'utf8'
+  });
+  if (result.status !== 0) {
+    process.stdout.write(result.stdout || '');
+    process.stderr.write(result.stderr || '');
+    fail(`QQ VIP entitlement regression failed: ${rel(testFile)}`);
   }
   process.stdout.write(result.stdout || '');
 }
@@ -1762,7 +1793,7 @@ async function checkProviderFallbackTerminalStateGuard() {
   if (!/function sourceFallbackProviderReady/.test(fallbackText) || !/status\.playbackKeyReady === true/.test(fallbackText) || !/function alternatePlaybackProviders/.test(fallbackText) || /if \(provider === 'netease'\) return 'qq'/.test(fallbackText)) {
     fail('automatic fallback must only select logged-in direct providers with complete playback authorization');
   }
-  if (!/SOURCE_FALLBACK_SEARCH_TIMEOUT_MS\s*=\s*6500/.test(fallbackText) || !/apiJson\(url, \{ timeoutMs: SOURCE_FALLBACK_SEARCH_TIMEOUT_MS \}\)/.test(fallbackText) || (playbackText.match(/timeoutMs:\s*9000/g) || []).length < 8 || (playbackText.match(/timeoutMs:\s*14000/g) || []).length < 2) {
+  if (!/SOURCE_FALLBACK_SEARCH_TIMEOUT_MS\s*=\s*6500/.test(fallbackText) || !/apiJson\(url, \{ timeoutMs: SOURCE_FALLBACK_SEARCH_TIMEOUT_MS \}\)/.test(fallbackText) || !/SOURCE_FALLBACK_RECOVERY_TIMEOUT_MS\s*=\s*20000/.test(fallbackText) || !/function awaitSourceFallbackBudget/.test(fallbackText) || (playbackText.match(/timeoutMs:\s*9000/g) || []).length < 6 || (playbackText.match(/timeoutMs:\s*14000/g) || []).length < 2 || (playbackText.match(/timeoutMs:\s*15000/g) || []).length < 2) {
     fail('fallback search, normal source resolution, and gapless source resolution must all be time-bounded');
   }
   if (!/alternateData[\s\S]{0,220}!alternateData\.url[\s\S]{0,320}playQueue\[idx\] = committedCandidate/.test(fallbackText) || !/fallbackStarted === true[\s\S]{0,180}已自动切换音源/.test(fallbackText) || !/function restoreSourceFallbackQueueItem/.test(fallbackText)) {
@@ -2069,24 +2100,15 @@ async function checkProviderFallbackTerminalStateGuard() {
   ) {
     fail('failed queue items must advance without reshuffling while preserving the caller playback options');
   }
-  const recentFailureAt = Date.now();
-  sandbox.playQueue = Array.from({ length: 13 }, function (_, index) {
-    return { provider: 'netease', id: 'failed-' + index, _lastPlaybackFailAt: index < 11 ? recentFailureAt : 0 };
-  });
-  sandbox.trackSwitchToken = 30;
-  let terminalSettleCalls = 0;
-  let cappedChildPlayCalls = 0;
-  sandbox.settleSourceFallbackTerminal = function () {
-    terminalSettleCalls++;
-    return false;
-  };
-  sandbox.playQueueAt = async function () {
-    cappedChildPlayCalls++;
-    return true;
-  };
-  const cappedSkipResult = await sandbox.skipFailedQueueItem(11, 30, '', { silent: true });
-  if (cappedSkipResult !== false || terminalSettleCalls !== 1 || cappedChildPlayCalls !== 0) {
-    fail('automatic queue recovery must settle once after 12 recent failures instead of scanning a 10k queue');
+  if (
+    !/SOURCE_FALLBACK_MAX_QUEUE_ADVANCES\s*=\s*2/.test(fallbackText)
+    || !/SOURCE_FALLBACK_MAX_PROVIDER_ATTEMPTS\s*=\s*4/.test(fallbackText)
+    || !/recovery\.visitedSongKeys/.test(fallbackText)
+    || !/recovery\.attemptedProviderKeys/.test(fallbackText)
+    || !/beginSourceFallbackPlaybackInvocation\(opts\)/.test(playbackText)
+    || !/clearPlaybackResumeWatchdogs\(\)/.test(fallbackText)
+  ) {
+    fail('automatic recovery must use one finite transaction with queue/provider dedupe and watchdog invalidation');
   }
   console.log('[OK] Provider fallback respects active credentials, commits after playback, and reaches a clean terminal state.');
 }
@@ -2285,7 +2307,9 @@ function checkProviderEntitlementBoundaryGuard() {
 function checkQQVipStatusSyncGuard() {
   logStep('QQ VIP status refresh guard');
   const serverText = fs.readFileSync(path.join(appRoot, 'server.js'), 'utf8');
-  const stateText = fs.readFileSync(path.join(appRoot, 'public', 'js', 'modules', '00-state', '00-core-stores.js'), 'utf8');
+  const vipModuleText = fs.readFileSync(path.join(appRoot, 'qq-vip-api.js'), 'utf8');
+  const mainText = fs.readFileSync(path.join(appRoot, 'desktop', 'main.js'), 'utf8');
+  const preloadText = fs.readFileSync(path.join(appRoot, 'desktop', 'preload.js'), 'utf8');
   const loginStatusText = fs.readFileSync(path.join(appRoot, 'public', 'js', 'modules', '08-account', '02-login-status.js'), 'utf8');
   const loginFlowText = fs.readFileSync(path.join(appRoot, 'public', 'js', 'modules', '08-account', '03-login-modal-flows.js'), 'utf8');
   const accountUtilsText = fs.readFileSync(path.join(appRoot, 'public', 'js', 'modules', '08-account', '01-login-modal-utils.js'), 'utf8');
@@ -2300,20 +2324,38 @@ function checkQQVipStatusSyncGuard() {
   if (!/function refreshQQConfiguredCookieStore/.test(serverText) || /function getQQLoginInfo[\s\S]{0,220}refreshConfiguredCookieStores\(true\)/.test(serverText)) {
     fail('QQ force refresh must only reload QQ cookies and must not refresh Qishui/Kugou/Netease stores');
   }
-  if (!/function normalizeQQVipPayload/.test(serverText) || !/qqVipObjectLooksExpired/.test(serverText) || !/vipProbeAvailable/.test(serverText)) {
+  if (!/function normalizeQQVipPayload/.test(serverText) || !/qqVipObjectLooksExpired/.test(serverText) || !/vipProbeAvailable/.test(serverText) ||
+      !/decision:\s*'unknown'/.test(vipModuleText) || !/resolveQQVipFromProbes/.test(vipModuleText)) {
     fail('QQ VIP status must normalize active, expired, VIP, and SVIP signals before exposing badges');
   }
-  if (!/function qqPlaybackMemberHints/.test(serverText) || !/handleQQSongUrl\(mid, mediaMid, quality, playbackHints\)/.test(serverText) || !/memberTrackHint && hasQQPlaybackSession/.test(serverText) || !/vipEvidence:\s*playbackVipEvidence/.test(serverText) || !/member-track-playback/.test(serverText)) {
-    fail('QQ playback resolver must expose member-track playback success as VIP evidence');
+  if (!/Promise\.allSettled\(probes\.map/.test(vipModuleText) ||
+      !/qqVipSessionCacheKey/.test(serverText) ||
+      /qqVipInfoCache\.get\(uin\)/.test(serverText)) {
+    fail('QQ VIP probes must all settle and cache results by the current account session fingerprint');
+  }
+  if (/vipEvidence:\s*playbackVipEvidence/.test(serverText) || /member-track-playback/.test(serverText) ||
+      !/function qqPlaybackShowsMemberAccess[\s\S]{0,260}return false;/.test(loginStatusText)) {
+    fail('QQ song hints and successful playback must not be promoted into persistent account VIP evidence');
   }
   if (!/function refreshQQVipStatusNow/.test(loginStatusText) || !/function qqLoginNeedsAuthorizationRefresh/.test(loginStatusText) || !/forceVip=1/.test(loginStatusText) || !/window\.addEventListener\('focus'/.test(loginStatusText) || !/visibilitychange/.test(loginStatusText)) {
     fail('QQ frontend must force VIP refresh on manual refresh and foreground return');
   }
-  if (!/QQ_PLAYBACK_VIP_EVIDENCE_STORE_KEY/.test(stateText) || !/function mergeQQPlaybackVipEvidence/.test(loginStatusText) || !/function applyQQPlaybackStatusEvidence/.test(loginStatusText) || !/writeQQPlaybackVipEvidence/.test(loginStatusText) || !/clearQQPlaybackVipEvidence/.test(userModalText)) {
-    fail('QQ VIP badge must keep short-lived playback evidence and clear it on QQ logout');
+  if (!/membershipKnown === false/.test(loginStatusText) ||
+      !/Object\.assign\(\{\}, qqLoginStatus,[\s\S]{0,180}membershipStale:\s*true/.test(loginStatusText) ||
+      /mergeQQPlaybackVipEvidence\(Object\.assign/.test(loginStatusText)) {
+    fail('QQ frontend must keep last-known-good membership on transient failures and show unknown membership as pending');
   }
-  if (!/function qqPlaybackEvidenceQuery/.test(playbackText) || !/qqPlaybackEvidenceQuery\(song\)/.test(playbackText) || !/applyQQPlaybackStatusEvidence\(data, song\)/.test(playbackText) || !/vipRequired=/.test(playbackText) || !/privilege=/.test(playbackText) || !/fee=/.test(playbackText)) {
-    fail('QQ playback requests must pass member-track hints and refresh the visible VIP badge immediately');
+  if (!/openQQMusicLoginWindow\(owner, options\)/.test(mainText) ||
+      !/options\.forceReauth[\s\S]{0,180}clearStorageData/.test(mainText) ||
+      !/openQQMusicLogin:\s*\(options\)/.test(preloadText) ||
+      !/forceReauth:\s*!!\(qqLoginStatus && qqLoginStatus\.loggedIn\)/.test(loginFlowText)) {
+    fail('QQ membership resync must force a fresh official login instead of reusing a stale playback key');
+  }
+  if (!/cookieIsExpired/.test(mainText) || !/qqLoginCookieCandidateScore/.test(mainText) ||
+      !/QQ_VKEY_REQUEST_TIMEOUT_MS = 6000/.test(serverText) ||
+      !/QQ_AUDIO_PROBE_TOTAL_MS = 6200/.test(serverText) ||
+      (playbackText.match(/timeoutMs: 15000/g) || []).length < 2) {
+    fail('QQ cookie selection and end-to-end playback timeout budgets must be deterministic and aligned');
   }
   if (!/providerVipAuditSameUser/.test(loginStatusText) || !/已同步/.test(loginStatusText)) {
     fail('provider VIP audit must detect normal-to-VIP sync as well as VIP loss');
@@ -2558,7 +2600,14 @@ function checkPlaybackResumeRecoveryGuard() {
   if (!/function trackSwitchStallRecoveryAllowed/.test(controlsText) || !/playbackResumeProvider\(song\) === 'qishui'/.test(controlsText) || !/\(opts\.trackSwitch \|\| opts\.manual \|\| opts\.fastResume\)/.test(controlsText) || !/function nudgeQishuiTrackStart/.test(controlsText) || !/qishui-track-start-stalled/.test(controlsText) || /if \(opts\.trackSwitch && !opts\.resumeRecovery\) return;/.test(controlsText)) {
     fail('Qishui auto-next start stalls must be watched, nudged, and refreshed instead of skipping track-switch recovery');
   }
-  if (!/resumeRecovery: !!opts\.resumeRecovery/.test(playbackText) || !/schedulePlaybackStallRecovery\(name, \{ silent: name !== 'error' \}\)/.test(progressText)) {
+  if (
+    !/resumeRecovery: !!opts\.resumeRecovery/.test(playbackText)
+    || !/audioEl !== audio/.test(progressText)
+    || !/__mineradioTrackSwitchToken\) !== Number\(trackSwitchToken\)/.test(progressText)
+    || !/playbackMediaMatchesCurrentQueueItem\(audioEl\)/.test(progressText)
+    || !/schedulePlaybackStallRecovery\(name,[\s\S]{0,260}ownerQueueItemKey/.test(progressText)
+    || !/function playbackStallRecoveryOwnerStillCurrent/.test(controlsText)
+  ) {
     fail('track-start and media error/stalled events must feed the shared resume recovery path');
   }
   console.log('[OK] Long-pause resume recovery refreshes expired provider URLs across providers.');
@@ -5191,6 +5240,8 @@ async function main() {
   console.log(`App root: ${appRoot}`);
   runNodeSyntaxCheck(jsCheckFiles());
   runPlaybackAudioGraphRegressionCheck();
+  runPlaybackSourceFallbackTransactionCheck();
+  runQQVipEntitlementRegressionCheck();
   runLoginEasterEggGateRegressionCheck();
   runQishuiProviderDistributionRegressionCheck();
   runSpotifyApiResilienceRegressionCheck();

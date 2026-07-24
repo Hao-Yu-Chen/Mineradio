@@ -508,22 +508,30 @@ function neteaseSourceMatchTriedIds(data) {
 async function retryNeteaseSourceMatchPlayback(song, data, idx, token, opts, requestedQuality) {
   if (!song || !data || !data.sourceMatch) return null;
   opts = opts || {};
+  var sourceRecovery = typeof sourceFallbackRecoveryFromOptions === 'function'
+    ? sourceFallbackRecoveryFromOptions(opts)
+    : null;
+  if (sourceRecovery && !sourceFallbackRecoveryCanContinue(sourceRecovery)) return null;
   var retryDepth = Math.max(0, Number(opts.neteaseSourceMatchRetryDepth) || 0);
   var triedIds = neteaseSourceMatchTriedIds(data);
   if (retryDepth >= 3 || triedIds.length >= 4) return null;
   var nextData = null;
   try {
-    nextData = await apiJson(
+    var nextDataPromise = apiJson(
       '/api/song/url?id=' + encodeURIComponent(song.id || '') +
       neteasePlaybackMatchQuery(song, { excludeIds: triedIds, skipDirect: true }) +
       '&quality=' + encodeURIComponent(requestedQuality),
       { timeoutMs: 10000 }
     );
+    nextData = sourceRecovery
+      ? await awaitSourceFallbackBudget(nextDataPromise, sourceRecovery)
+      : await nextDataPromise;
   } catch (err) {
     console.warn('[NeteaseSourceMatch] next candidate lookup failed:', err);
     return token === trackSwitchToken ? null : false;
   }
   if (token !== trackSwitchToken) return false;
+  if (sourceRecovery && (nextData === sourceFallbackBudgetTimeoutResult || !sourceFallbackRecoveryCanContinue(sourceRecovery))) return null;
   if (!nextData || !nextData.url || !nextData.sourceMatch) return null;
   var retryOpts = Object.assign({}, opts, {
     albumGaplessHandoff: false,
@@ -552,7 +560,7 @@ async function resolveAlbumGaplessPlaybackData(song) {
   if (playbackQualityAboveCap(requestedQuality, playbackProvider, runtimeQualityCap)) requestedQuality = runtimeQualityCap;
   var qualityParam = '&quality=' + encodeURIComponent(requestedQuality);
   if (playbackProvider === 'qq') {
-    return apiJson('/api/qq/song/url?mid=' + encodeURIComponent(song.mid || song.songmid || song.id || '') + '&mediaMid=' + encodeURIComponent(song.mediaMid || song.media_mid || '') + qqPlaybackEvidenceQuery(song) + qualityParam, { timeoutMs: 9000 });
+    return apiJson('/api/qq/song/url?mid=' + encodeURIComponent(song.mid || song.songmid || song.id || '') + '&mediaMid=' + encodeURIComponent(song.mediaMid || song.media_mid || '') + qqPlaybackEvidenceQuery(song) + qualityParam, { timeoutMs: 15000 });
   }
   if (playbackProvider === 'kugou') {
     return apiJson('/api/kugou/song/url?hash=' + encodeURIComponent(song.hash || song.fileHash || song.audioHash || song.id || '') +
@@ -829,6 +837,7 @@ async function playLocalQueueSong(song, idx, token, firstVisualPlay, opts, resum
   await applyAudioOutputDevice(audio);
   audio.src = song.localUrl;
   audio.__mineradioQueueItemKey = queueItemKey(song);
+  audio.__mineradioTrackSwitchToken = token;
   updatePlaybackProgressUi();
   lyricSunEnergy = 0; lyricSunTarget = 0; lyricSunHold = 0; lyricSunAvg = 0; lyricSunPeak = 0.55;
   audio.onended = function () {
@@ -894,7 +903,8 @@ async function playLocalQueueSong(song, idx, token, firstVisualPlay, opts, resum
 
 async function playQueueAt(idx, opts) {
   opts = opts || {};
-  if (idx < 0 || idx >= playQueue.length) return;
+  if (typeof beginSourceFallbackPlaybackInvocation === 'function' && !beginSourceFallbackPlaybackInvocation(opts)) return false;
+  if (idx < 0 || idx >= playQueue.length) return false;
   if (typeof ensurePlaylistQueueHydratedAhead === 'function') ensurePlaylistQueueHydratedAhead(idx);
   var albumGaplessHandoff = !!(opts.albumGaplessHandoff && opts.preloadedAudio && opts.preloadedData);
   var albumGaplessMixed = !!(albumGaplessHandoff && opts.albumGaplessMixed);
@@ -1044,8 +1054,11 @@ async function playQueueAt(idx, opts) {
     safePlaybackStep('trial-banner-reset', function () { document.getElementById('trial-banner').classList.remove('show'); });
     if (song.type === 'local' || song.source === 'local' || song.localUrl) {
       markPlayPhase('local-audio');
-      await playLocalQueueSong(song, idx, token, firstVisualPlay, opts, restoreResumeAt);
-      return;
+      var localStarted = await playLocalQueueSong(song, idx, token, firstVisualPlay, opts, restoreResumeAt);
+      if (localStarted === true && typeof completeSourceFallbackRecovery === 'function') {
+        completeSourceFallbackRecovery(sourceFallbackRecoveryFromOptions(opts));
+      }
+      return localStarted === true;
     }
     safePlaybackStep('show-loading', function () { showLoading({ trackSwitch: true, seamlessCover: true }); });
     if (!qualitySwitch) lyricSunEnergy = 0; lyricSunTarget = 0; lyricSunHold = 0; lyricSunAvg = 0; lyricSunPeak = 0.55;
@@ -1078,7 +1091,7 @@ async function playQueueAt(idx, opts) {
       } else if (opts.preResolvedPlaybackData && opts.preResolvedPlaybackData.url) {
         data = opts.preResolvedPlaybackData;
       } else if (isQQPlayback) {
-        data = await apiJson('/api/qq/song/url?mid=' + encodeURIComponent(song.mid || song.songmid || song.id || '') + '&mediaMid=' + encodeURIComponent(song.mediaMid || song.media_mid || '') + qqPlaybackEvidenceQuery(song) + qualityParam, { timeoutMs: 9000 });
+        data = await apiJson('/api/qq/song/url?mid=' + encodeURIComponent(song.mid || song.songmid || song.id || '') + '&mediaMid=' + encodeURIComponent(song.mediaMid || song.media_mid || '') + qqPlaybackEvidenceQuery(song) + qualityParam, { timeoutMs: 15000 });
       } else if (isKugouPlayback) {
         data = await apiJson('/api/kugou/song/url?hash=' + encodeURIComponent(song.hash || song.fileHash || song.audioHash || song.id || '') +
           '&albumId=' + encodeURIComponent(song.albumId || song.album_id || '') +
@@ -1102,6 +1115,13 @@ async function playQueueAt(idx, opts) {
         data = await apiJson('/api/song/url?id=' + encodeURIComponent(song.id || '') + neteasePlaybackMatchQuery(song) + qualityParam, { timeoutMs: 14000 });
       }
       if (token !== trackSwitchToken) return;
+      if (
+        typeof sourceFallbackRecoveryFromOptions === 'function'
+        && sourceFallbackRecoveryFromOptions(opts)
+        && !sourceFallbackRecoveryCanContinue(sourceFallbackRecoveryFromOptions(opts))
+      ) {
+        return settleExpiredSourceFallbackPlayback(idx, token, opts);
+      }
       if (data) {
         song.resolvedPlaybackProvider = playbackProvider;
         song.playbackLevel = data.level || song.playbackLevel || '';
@@ -1203,8 +1223,16 @@ async function playQueueAt(idx, opts) {
         disposeStalePlaybackInvocationMedia(playbackMedia);
         return false;
       }
+      if (
+        typeof sourceFallbackRecoveryFromOptions === 'function'
+        && sourceFallbackRecoveryFromOptions(opts)
+        && !sourceFallbackRecoveryCanContinue(sourceFallbackRecoveryFromOptions(opts))
+      ) {
+        return settleExpiredSourceFallbackPlayback(idx, token, opts);
+      }
       if (!albumGaplessHandoff) audio.src = proxyAudioUrl;
       audio.__mineradioQueueItemKey = queueItemKey(song);
+      audio.__mineradioTrackSwitchToken = token;
       updatePlaybackProgressUi();
       audio.onended = function () {
         if (token !== trackSwitchToken) return;
@@ -1292,6 +1320,13 @@ async function playQueueAt(idx, opts) {
       if (!playbackInvocationStillCurrent(playbackMedia)) return false;
       var playbackStarted = await playAudio({ manual: !!opts.manual, silent: isQQPlayback || !!opts.startupAutoplay || !opts.manual, startupAutoplay: !!opts.startupAutoplay, trackSwitch: true, resumeRecovery: !!opts.resumeRecovery, fade: albumGaplessHandoff ? false : opts.fade, preserveGain: albumGaplessMixed, expectedMedia: playbackMedia, expectedToken: token });
       if (!playbackInvocationStillCurrent(playbackMedia)) return false;
+      if (
+        typeof sourceFallbackRecoveryFromOptions === 'function'
+        && sourceFallbackRecoveryFromOptions(opts)
+        && !sourceFallbackRecoveryCanContinue(sourceFallbackRecoveryFromOptions(opts))
+      ) {
+        return settleExpiredSourceFallbackPlayback(idx, token, opts);
+      }
       if (!playbackStarted) {
         if (playbackProvider === 'netease' && data && data.sourceMatch) {
           var sameSourceRetry = await retryNeteaseSourceMatchPlayback(song, data, idx, token, retryPlaybackOpts, requestedQuality);
@@ -1304,8 +1339,29 @@ async function playQueueAt(idx, opts) {
           if (token !== trackSwitchToken) return qqRetryStarted === true;
           if (qqRetryStarted) return true;
         }
+        var mediaFailureRecovery = typeof sourceFallbackRecoveryFromOptions === 'function'
+          ? sourceFallbackRecoveryFromOptions(retryPlaybackOpts)
+          : null;
+        if (!opts.manual && (!opts.startupAutoplay || mediaFailureRecovery)) {
+          var mediaFailureFallback = await tryAutoPlaybackFallback(
+            song,
+            Object.assign({}, data || {}, { url: null, reason: 'media_start_failed' }),
+            idx,
+            token,
+            retryPlaybackOpts
+          );
+          if (mediaFailureFallback !== null) return mediaFailureFallback === true;
+          if (mediaFailureRecovery) {
+            return await skipFailedQueueItem(
+              idx,
+              token,
+              '当前歌曲无法启动播放，正在尝试队列里的下一首。',
+              sourceFallbackRecoveryFailureOptions(retryPlaybackOpts)
+            );
+          }
+        }
         forcePlaybackControlsInteractive();
-        if (opts.startupAutoplay) {
+        if (opts.startupAutoplay && !mediaFailureRecovery) {
           return false;
         }
         if (!opts.suppressPlayFailureNotice) {
@@ -1367,16 +1423,28 @@ async function playQueueAt(idx, opts) {
       }
       scheduleAlbumGaplessPreloadForCurrent(token, albumGaplessHandoff ? 'album-gapless-handoff-started' : 'track-started');
       safePlaybackStep('shelf-preview-suppress-end', suppressShelfPreviewForPlaybackSwitch);
+      if (typeof completeSourceFallbackRecovery === 'function') {
+        completeSourceFallbackRecovery(sourceFallbackRecoveryFromOptions(opts));
+      }
       return true;
     } catch (err) {
       console.error('Play failed:', { phase: playPhase, error: err }, err);
       hideLoading();
       forcePlaybackControlsInteractive();
-      if (opts.startupAutoplay) {
+      var catchRecovery = typeof sourceFallbackRecoveryFromOptions === 'function'
+        ? sourceFallbackRecoveryFromOptions(opts)
+        : null;
+      if (opts.startupAutoplay && !catchRecovery) {
         return false;
       }
-      if (!isPlaybackRecursionError(err) && token === trackSwitchToken && !opts.manual && playQueue.length > 1) {
-        return await skipFailedQueueItem(idx, token, '当前歌曲加载失败，正在尝试队列里的下一首。');
+      if (catchRecovery && opts.fallbackDepth > 0) return false;
+      if (!isPlaybackRecursionError(err) && token === trackSwitchToken && !opts.manual && (catchRecovery || playQueue.length > 1)) {
+        return await skipFailedQueueItem(
+          idx,
+          token,
+          '当前歌曲加载失败，正在尝试队列里的下一首。',
+          catchRecovery ? sourceFallbackRecoveryFailureOptions(opts) : { playbackOpts: opts }
+        );
       }
       if (opts.suppressPlayFailureNotice) return false;
       var failText = playbackFailureToastText(err);
@@ -1388,11 +1456,20 @@ async function playQueueAt(idx, opts) {
     console.error('Play setup failed:', { phase: playPhase, error: setupErr }, setupErr);
     hideLoading();
     forcePlaybackControlsInteractive();
-    if (opts.startupAutoplay) {
+    var setupRecovery = typeof sourceFallbackRecoveryFromOptions === 'function'
+      ? sourceFallbackRecoveryFromOptions(opts)
+      : null;
+    if (opts.startupAutoplay && !setupRecovery) {
       return false;
     }
-      if (!isPlaybackRecursionError(setupErr) && typeof token !== 'undefined' && token === trackSwitchToken && !opts.manual && playQueue.length > 1) {
-        return await skipFailedQueueItem(idx, token, '当前歌曲切换失败，正在尝试队列里的下一首。');
+    if (setupRecovery && opts.fallbackDepth > 0) return false;
+      if (!isPlaybackRecursionError(setupErr) && typeof token !== 'undefined' && token === trackSwitchToken && !opts.manual && (setupRecovery || playQueue.length > 1)) {
+        return await skipFailedQueueItem(
+          idx,
+          token,
+          '当前歌曲切换失败，正在尝试队列里的下一首。',
+          setupRecovery ? sourceFallbackRecoveryFailureOptions(opts) : { playbackOpts: opts }
+        );
     }
     if (opts.suppressPlayFailureNotice) return false;
     var setupFailText = playbackFailureToastText(setupErr);

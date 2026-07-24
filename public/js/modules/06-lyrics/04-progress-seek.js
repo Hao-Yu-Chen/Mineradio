@@ -199,6 +199,13 @@ function bindPlaybackProgressEvents(audioEl) {
   });
   ['play', 'playing', 'pause', 'ended', 'emptied', 'abort', 'error'].forEach(function (name) {
     audioEl.addEventListener(name, function () {
+      if (audioEl !== audio) return;
+      if (Number(audioEl.__mineradioTrackSwitchToken) !== Number(trackSwitchToken)) return;
+      if (
+        name !== 'emptied'
+        && typeof playbackMediaMatchesCurrentQueueItem === 'function'
+        && !playbackMediaMatchesCurrentQueueItem(audioEl)
+      ) return;
       if (name === 'ended' && audioEl === audio && playbackTransitionHasAudibleNextDeck()) return;
       syncPlaybackStateFromAudioEvent(name);
       saveLastPlaybackSnapshot(name === 'pause' || name === 'ended', name);
@@ -206,7 +213,17 @@ function bindPlaybackProgressEvents(audioEl) {
   });
   ['error', 'stalled'].forEach(function (name) {
     audioEl.addEventListener(name, function () {
-      if (typeof schedulePlaybackStallRecovery === 'function') schedulePlaybackStallRecovery(name, { silent: name !== 'error' });
+      if (audioEl !== audio) return;
+      if (Number(audioEl.__mineradioTrackSwitchToken) !== Number(trackSwitchToken)) return;
+      if (typeof playbackMediaMatchesCurrentQueueItem === 'function' && !playbackMediaMatchesCurrentQueueItem(audioEl)) return;
+      if (typeof schedulePlaybackStallRecovery === 'function') {
+        schedulePlaybackStallRecovery(name, {
+          silent: name !== 'error',
+          ownerMedia: audioEl,
+          ownerToken: trackSwitchToken,
+          ownerQueueItemKey: String(audioEl.__mineradioQueueItemKey || '')
+        });
+      }
     });
   });
 }

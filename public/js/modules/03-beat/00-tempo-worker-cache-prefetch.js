@@ -374,7 +374,7 @@ async function fetchBeatPrefetchAudioUrl(song) {
   var qualityParam = '&quality=' + encodeURIComponent(requestedQuality);
   var neteaseMatchQuery = typeof neteasePlaybackMatchQuery === 'function' ? neteasePlaybackMatchQuery(song) : '';
   var data = isQQ
-    ? await apiJson('/api/qq/song/url?mid=' + encodeURIComponent(song.mid || song.songmid || song.id || '') + '&mediaMid=' + encodeURIComponent(song.mediaMid || song.media_mid || '') + qualityParam, { timeoutMs: 9000 })
+    ? await apiJson('/api/qq/song/url?mid=' + encodeURIComponent(song.mid || song.songmid || song.id || '') + '&mediaMid=' + encodeURIComponent(song.mediaMid || song.media_mid || '') + qualityParam, { timeoutMs: 15000 })
     : await apiJson('/api/song/url?id=' + encodeURIComponent(song.id) + neteaseMatchQuery + qualityParam, { timeoutMs: 14000 });
   if (!data || !data.url || data.trial) return null;
   return '/api/audio?url=' + encodeURIComponent(data.url);

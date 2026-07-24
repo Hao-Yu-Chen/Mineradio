@@ -49,7 +49,7 @@ contextBridge.exposeInMainWorld('desktopWindow', {
   resetLoginEasterEgg: () => ipcRenderer.invoke('mineradio-login-easter-egg-reset'),
   openNeteaseMusicLogin: () => ipcRenderer.invoke('netease-music-open-login'),
   clearNeteaseMusicLogin: () => ipcRenderer.invoke('netease-music-clear-login'),
-  openQQMusicLogin: () => ipcRenderer.invoke('qq-music-open-login'),
+  openQQMusicLogin: (options) => ipcRenderer.invoke('qq-music-open-login', options || {}),
   clearQQMusicLogin: () => ipcRenderer.invoke('qq-music-clear-login'),
   openKugouMusicLogin: () => ipcRenderer.invoke('kugou-music-open-login'),
   clearKugouMusicLogin: () => ipcRenderer.invoke('kugou-music-clear-login'),

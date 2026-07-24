@@ -135,8 +135,8 @@ async function refreshLoginStatus(force) {
 }
 
 function normalizeQQLoginStatus(info) {
-  var fallback = { provider: 'qq', loggedIn: false, preview: false, nickname: 'QQ 音乐', userId: '', avatar: '', vipType: 0, svipType: 0, vipLevel: 'none', isVip: false, isSvip: false, stale: false, playbackKeyReady: false, vipCheckedAt: 0, vipSource: '', vipProbeAvailable: false, membershipStale: false, authorizationIncomplete: false, vipSyncState: '' };
-  if (!info || !info.loggedIn) return mergeQQPlaybackVipEvidence(Object.assign({}, fallback, info || {}, {
+  var fallback = { provider: 'qq', loggedIn: false, preview: false, nickname: 'QQ 音乐', userId: '', avatar: '', vipType: 0, svipType: 0, vipLevel: 'none', isVip: false, isSvip: false, stale: false, playbackKeyReady: false, vipCheckedAt: 0, vipSource: '', vipProbeAvailable: false, membershipKnown: false, membershipStale: false, authorizationIncomplete: false, vipSyncState: '' };
+  if (!info || !info.loggedIn) return Object.assign({}, fallback, info || {}, {
     provider: 'qq',
     loggedIn: false,
     nickname: info && info.nickname || fallback.nickname,
@@ -151,11 +151,12 @@ function normalizeQQLoginStatus(info) {
     vipCheckedAt: Number(info && info.vipCheckedAt || 0) || 0,
     vipSource: info && info.vipSource || '',
     vipProbeAvailable: !!(info && info.vipProbeAvailable),
+    membershipKnown: !!(info && info.membershipKnown),
     membershipStale: !!(info && info.membershipStale),
     authorizationIncomplete: !!(info && info.authorizationIncomplete),
     vipSyncState: info && info.vipSyncState || ''
-  }));
-  return mergeQQPlaybackVipEvidence(Object.assign({}, fallback, info, {
+  });
+  return Object.assign({}, fallback, info, {
     provider: 'qq',
     loggedIn: true,
     nickname: info.nickname || fallback.nickname,
@@ -171,15 +172,21 @@ function normalizeQQLoginStatus(info) {
     vipCheckedAt: Number(info.vipCheckedAt || 0) || 0,
     vipSource: info.vipSource || '',
     vipProbeAvailable: !!info.vipProbeAvailable,
+    membershipKnown: !!info.membershipKnown,
     membershipStale: !!info.membershipStale,
     authorizationIncomplete: !!info.authorizationIncomplete,
     vipSyncState: info.vipSyncState || ''
-  }));
+  });
 }
 
 function qqLoginNeedsAuthorizationRefresh(status) {
   status = status || qqLoginStatus;
-  return !!(status && status.loggedIn && (status.authorizationIncomplete || status.membershipStale || status.playbackKeyReady === false));
+  return !!(status && status.loggedIn && (
+    status.authorizationIncomplete ||
+    status.membershipStale ||
+    status.membershipKnown === false ||
+    status.playbackKeyReady === false
+  ));
 }
 function qqMembershipLabel(status) {
   if (qqLoginNeedsAuthorizationRefresh(status)) return '会员待同步';
@@ -223,7 +230,17 @@ async function refreshQQLoginStatus(options) {
     return qqLoginStatus;
   } catch (e) {
     console.warn('QQ login status failed:', e);
-    qqLoginStatus = normalizeQQLoginStatus(null);
+    if (qqLoginStatus && qqLoginStatus.loggedIn) {
+      qqLoginStatus = normalizeQQLoginStatus(Object.assign({}, qqLoginStatus, {
+        loggedIn: true,
+        stale: true,
+        membershipStale: true,
+        vipProbeAvailable: false,
+        vipSyncState: 'stale'
+      }));
+    } else {
+      qqLoginStatus = normalizeQQLoginStatus(null);
+    }
     renderUserBtn();
     return qqLoginStatus;
   }
@@ -307,49 +324,12 @@ function applyKugouPlaybackStatusEvidence(info) {
   return true;
 }
 function qqPlaybackShowsMemberAccess(info, song) {
-  if (!info || info.provider !== 'qq') return false;
-  if (!(info.url || info.playable || info.playbackReady)) return false;
-  if (info.vipEvidence || info.vipRequired || info.needVip || info.need_vip || info.onlyVipPlayable || info.only_vip_playable) return true;
-  song = song || {};
-  if (song.vipRequired || song.needVip || song.need_vip || song.onlyVipPlayable || song.only_vip_playable) return true;
-  if (typeof songRequiresVip === 'function') {
-    try { return songRequiresVip(Object.assign({}, song, info)); } catch (e) { return false; }
-  }
+  // A playable URL plus a song-level VIP hint proves that this request worked;
+  // it does not prove the account owns a subscription.
   return false;
 }
 function applyQQPlaybackStatusEvidence(info, song) {
-  if (!qqPlaybackShowsMemberAccess(info, song)) return false;
-  var existing = qqLoginStatus || {};
-  var userId = existing.userId || existing.uin || (info && (info.userId || info.uin)) || '';
-  if (!(existing.loggedIn || (info && info.loggedIn)) || !userId) return false;
-  var svip = providerVipLevel('qq', existing) === 'svip' || !!existing.isSvip || !!(info && info.isSvip);
-  var checkedAt = Date.now();
-  var merged = Object.assign({}, existing, info || {}, {
-    provider: 'qq',
-    loggedIn: true,
-    userId: userId,
-    nickname: existing.nickname || (info && info.nickname) || '',
-    avatar: existing.avatar || (info && info.avatar) || '',
-    vipType: Math.max(Number(existing.vipType || existing.vip_type || 0) || 0, Number(info && (info.vipType || info.vip_type || 0) || 0) || 0, 1),
-    svipType: Math.max(Number(existing.svipType || existing.svip_type || 0) || 0, Number(info && (info.svipType || info.svip_type || 0) || 0) || 0),
-    vipLevel: svip ? 'svip' : 'vip',
-    isVip: true,
-    isSvip: svip,
-    playbackKeyReady: true,
-    vipCheckedAt: checkedAt,
-    vipSource: info && info.vipSource || 'qq-playback-evidence',
-    vipProbeAvailable: true,
-    membershipStale: false,
-    authorizationIncomplete: false,
-    vipSyncState: 'playback_evidence'
-  });
-  writeQQPlaybackVipEvidence(Object.assign({}, merged, { checkedAt: checkedAt }));
-  qqLoginStatus = normalizeQQLoginStatus(merged);
-  auditProviderVipState('qq', qqLoginStatus);
-  qqLoginWasLoggedIn = true;
-  if (!hasPlatformLogin(activeAccountProvider)) activeAccountProvider = 'qq';
-  renderUserBtn();
-  return true;
+  return false;
 }
 async function refreshKugouLoginStatus() {
   try {

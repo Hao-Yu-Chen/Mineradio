@@ -10,14 +10,14 @@ Mineradio 是一款 Windows 桌面沉浸式音乐播放器，把搜索播放、�
 
 | 下载入口 | 推荐人群 | 链接 |
 | --- | --- | --- |
-| 蓝奏云满速下载 | 国内用户优先 | [下载 Mineradio 2.0.1 安装包](https://xxhuber.lanzout.com/s/Mineradio) |
-| GitHub Release | GitHub 用户 | [Mineradio 2.0.1 Release](https://github.com/XxHuberrr/Mineradio/releases/tag/v2.0.1) |
+| 蓝奏云满速下载 | 国内用户优先 | [下载 Mineradio 2.0.2 安装包](https://xxhuber.lanzout.com/s/Mineradio) |
+| GitHub Release | GitHub 用户 | [Mineradio 2.0.2 Release](https://github.com/XxHuberrr/Mineradio/releases/tag/v2.0.2) |
 
-安装时只需要下载并运行 `Mineradio-2.0.1-Setup.exe`。不要把 `.blockmap`、`latest.yml` 或 `win-unpacked` 当成正式安装包。
+安装时只需要下载并运行 `Mineradio-2.0.2-Setup.exe`。不要把 `.blockmap`、`latest.yml` 或 `win-unpacked` 当成正式安装包。
 
 ## 下载或安装被拦截怎么办
 
-小众 Electron 桌面软件、未签名安装包有时会被浏览器、Windows Defender 或 SmartScreen 提示风险。请先确认安装包来自上面的蓝奏云或 GitHub Release 官方入口，文件名是 `Mineradio-2.0.1-Setup.exe`。
+小众 Electron 桌面软件、未签名安装包有时会被浏览器、Windows Defender 或 SmartScreen 提示风险。请先确认安装包来自上面的蓝奏云或 GitHub Release 官方入口，文件名是 `Mineradio-2.0.2-Setup.exe`。
 
 1. 浏览器下载栏提示风险时，打开下载列表，点这条下载右侧的 `...` 三个点，选择 `保留` / `仍要保留` / `显示更多` 后继续保留。
 2. Windows SmartScreen 弹出蓝色拦截窗口时，点 `更多信息`，再点 `仍要运行`。
@@ -35,11 +35,11 @@ Mineradio 2.0 重新整理了视觉层次、桌面模式、主页与搜索体验
 
 ## 当前版本
 
-当前版本：`2.0.1`
+当前版本：`2.0.2`
 
-状态：Mineradio 2.0.1 正式版。
+状态：Mineradio 2.0.2 正式版。
 
-> 安全提示：`v1.0.10` 及更早旧安装包不再建议继续安装或传播。请使用本页提供的 `Mineradio-2.0.1-Setup.exe`。
+> 安全提示：`v1.0.10` 及更早旧安装包不再建议继续安装或传播。请使用本页提供的 `Mineradio-2.0.2-Setup.exe`。
 
 ## 核心特性
 
@@ -61,9 +61,9 @@ Mineradio 2.0 重新整理了视觉层次、桌面模式、主页与搜索体验
 
 Windows 用户可以在 GitHub Releases 中下载安装包。
 
-正式分发以 `Mineradio-2.0.1-Setup.exe` 为准，不建议直接使用 `win-unpacked` 目录。安装包会创建桌面快捷方式。
+正式分发以 `Mineradio-2.0.2-Setup.exe` 为准，不建议直接使用 `win-unpacked` 目录。安装包会创建桌面快捷方式。
 
-已经安装过旧版本的用户可直接运行 `Mineradio-2.0.1-Setup.exe` 完成更新。
+已经安装过旧版本的用户可直接运行 `Mineradio-2.0.2-Setup.exe` 完成更新。
 
 ## 开发运行
 

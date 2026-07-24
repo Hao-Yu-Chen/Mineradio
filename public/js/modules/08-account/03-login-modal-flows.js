@@ -1109,7 +1109,9 @@ async function openQQWebLogin() {
   updateLoginProviderUi();
   if (statusEl) { statusEl.textContent = '已打开 QQ 音乐窗口，请扫码并确认登录…'; statusEl.className = 'preview'; }
   try {
-    var result = await api.openQQMusicLogin();
+    var result = await api.openQQMusicLogin({
+      forceReauth: !!(qqLoginStatus && qqLoginStatus.loggedIn)
+    });
     if (!result || !result.ok || !result.cookie) {
       throw new Error((result && (result.message || result.error)) || 'QQ 登录未完成');
     }

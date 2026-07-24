@@ -160,13 +160,59 @@ function showQishuiTrackStartStallNotice() {
   else if (typeof showToast === 'function') showToast(title + '：' + body);
 }
 
+function playbackFreshUrlRecoverySongKey(song) {
+  if (typeof queueItemKey === 'function') return queueItemKey(song);
+  return song ? [songProviderKey(song), song.id || song.mid || song.hash || ''].join(':') : '';
+}
+
+function resetPlaybackFreshUrlRecoveryBudget(song) {
+  if (!playbackResumeRecovery) return;
+  playbackResumeRecovery.freshUrlSongKey = playbackFreshUrlRecoverySongKey(song);
+  playbackResumeRecovery.freshUrlAttemptCount = 0;
+}
+
+function playbackStallRecoveryTransaction(song, opts) {
+  opts = opts || {};
+  var recovery = typeof sourceFallbackRecoveryFromOptions === 'function'
+    ? sourceFallbackRecoveryFromOptions(opts)
+    : null;
+  var recoverySongKey = typeof sourceFallbackRecoveryContentKey === 'function'
+    ? sourceFallbackRecoveryContentKey(song)
+    : '';
+  if (
+    !recovery
+    && typeof sourceFallbackRecoveryIdentityActive === 'function'
+    && sourceFallbackRecoveryIdentityActive(activeSourceFallbackRecovery)
+    && (!recoverySongKey || activeSourceFallbackRecovery.visitedSongKeys[recoverySongKey])
+  ) {
+    recovery = activeSourceFallbackRecovery;
+  }
+  if (!recovery && typeof ensureSourceFallbackRecovery === 'function') {
+    recovery = ensureSourceFallbackRecovery({}, song, currentIdx, trackSwitchToken);
+  }
+  return recovery;
+}
+
 async function recoverCurrentTrackPlaybackFromFreshUrl(reason, opts) {
   opts = opts || {};
   if (!playQueue.length || currentIdx < 0 || currentIdx >= playQueue.length) return false;
   var song = playQueue[currentIdx];
   if (!canRefreshCurrentPlaybackUrlForResume(song)) return false;
+  var songKey = playbackFreshUrlRecoverySongKey(song);
+  if (playbackResumeRecovery.freshUrlSongKey !== songKey) resetPlaybackFreshUrlRecoveryBudget(song);
   var now = performance.now();
   if (playbackResumeRecovery.pending || now - (playbackResumeRecovery.lastAttemptAt || 0) < 1200) return false;
+  var recovery = playbackStallRecoveryTransaction(song, opts);
+  if (!recovery) return false;
+  if ((Number(playbackResumeRecovery.freshUrlAttemptCount) || 0) >= 1) {
+    return settleSourceFallbackTerminal(
+      currentIdx,
+      trackSwitchToken,
+      '当前歌曲重新取链后仍无法播放，已停止自动重试。',
+      { silent: !!opts.silent, sourceFallbackRecovery: recovery }
+    );
+  }
+  playbackResumeRecovery.freshUrlAttemptCount = (Number(playbackResumeRecovery.freshUrlAttemptCount) || 0) + 1;
   playbackResumeRecovery.pending = true;
   playbackResumeRecovery.lastAttemptAt = now;
   playbackResumeRecovery.lastReason = reason || 'resume-recovery';
@@ -177,16 +223,34 @@ async function recoverCurrentTrackPlaybackFromFreshUrl(reason, opts) {
     if (!opts.silent && typeof showSourceFallbackNotice === 'function') {
       showSourceFallbackNotice('播放恢复保护', '旧播放链接可能已失效，正在重新取链并回到原进度。');
     }
-    await playQueueAt(currentIdx, {
+    var recovered = await playQueueAt(currentIdx, {
       manual: true,
       resumeAt: resumeAt,
       preserveHomeState: true,
       suppressPlayFailureNotice: true,
-      resumeRecovery: true
+      resumeRecovery: true,
+      sourceFallbackRecovery: recovery
     });
-    return true;
+    if (recovered === true) return true;
+    if (sourceFallbackRecoveryIdentityActive(recovery)) {
+      return settleSourceFallbackTerminal(
+        currentIdx,
+        trackSwitchToken,
+        '当前歌曲重新取链后仍无法播放，已停止自动重试。',
+        { silent: !!opts.silent, sourceFallbackRecovery: recovery }
+      );
+    }
+    return false;
   } catch (recoveryErr) {
     console.warn('[PlaybackResumeRecovery]', reason, recoveryErr);
+    if (sourceFallbackRecoveryIdentityActive(recovery)) {
+      settleSourceFallbackTerminal(
+        currentIdx,
+        trackSwitchToken,
+        '当前歌曲恢复失败，已停止自动重试。',
+        { silent: !!opts.silent, sourceFallbackRecovery: recovery }
+      );
+    }
     return false;
   } finally {
     playbackResumeRecovery.pending = false;
@@ -194,23 +258,35 @@ async function recoverCurrentTrackPlaybackFromFreshUrl(reason, opts) {
   }
 }
 
+function playbackStallRecoveryOwnerStillCurrent(media, src, token, recoverySerial, queueKey) {
+  if (!isSameAudioPlaybackTarget(media, src)) return false;
+  if (token !== trackSwitchToken || recoverySerial !== playbackResumeRecovery.serial) return false;
+  if (media.paused || media.ended || media.seeking) return false;
+  if (queueKey && String(media.__mineradioQueueItemKey || '') !== queueKey) return false;
+  if (typeof playbackMediaMatchesCurrentQueueItem === 'function' && !playbackMediaMatchesCurrentQueueItem(media)) return false;
+  return true;
+}
+
 function schedulePlaybackStallRecovery(reason, opts) {
   opts = opts || {};
-  if (!audio || !audio.src) return;
+  var media = opts.ownerMedia || audio;
+  if (!media || media !== audio || !media.src) return;
+  if (opts.ownerToken != null && Number(opts.ownerToken) !== Number(trackSwitchToken)) return;
+  var queueKey = String(opts.ownerQueueItemKey || media.__mineradioQueueItemKey || '');
+  if (queueKey && String(media.__mineradioQueueItemKey || '') !== queueKey) return;
+  if (typeof playbackMediaMatchesCurrentQueueItem === 'function' && !playbackMediaMatchesCurrentQueueItem(media)) return;
   var song = playQueue[currentIdx];
   if (!trackSwitchStallRecoveryAllowed(song, opts)) return;
   if (!canRefreshCurrentPlaybackUrlForResume(song)) return;
   clearPlaybackResumeWatchdogs();
-  var media = audio;
+  playbackResumeRecovery.serial = (Number(playbackResumeRecovery.serial) || 0) + 1;
   var src = media.currentSrc || media.src || '';
   var token = trackSwitchToken;
   var startTime = isFinite(media.currentTime) ? media.currentTime : 0;
   var recoverySerial = playbackResumeRecovery.serial;
   PLAYBACK_RESUME_STALL_DELAYS.forEach(function (delayMs) {
     var timerId = setTimeout(async function () {
-      if (!isSameAudioPlaybackTarget(media, src)) return;
-      if (token !== trackSwitchToken || recoverySerial !== playbackResumeRecovery.serial) return;
-      if (media.paused || media.ended || media.seeking) return;
+      if (!playbackStallRecoveryOwnerStillCurrent(media, src, token, recoverySerial, queueKey)) return;
       var current = isFinite(media.currentTime) ? media.currentTime : 0;
       var minAdvance = delayMs > 2000 ? 0.28 : 0.08;
       if (current >= startTime + minAdvance) return;
@@ -222,6 +298,7 @@ function schedulePlaybackStallRecovery(reason, opts) {
         } catch (nudgeGraphErr) {
           console.warn('[PlaybackResumeRecovery] qishui graph precheck failed:', nudgeGraphErr);
         }
+        if (!playbackStallRecoveryOwnerStillCurrent(media, src, token, recoverySerial, queueKey)) return;
         if (await nudgeQishuiTrackStart(media, src, token)) return;
         return;
       }
@@ -232,7 +309,7 @@ function schedulePlaybackStallRecovery(reason, opts) {
       } catch (graphErr) {
         console.warn('[PlaybackResumeRecovery] graph precheck failed:', graphErr);
       }
-      if (!isSameAudioPlaybackTarget(media, src) || media.paused || media.ended) return;
+      if (!playbackStallRecoveryOwnerStillCurrent(media, src, token, recoverySerial, queueKey)) return;
       current = isFinite(media.currentTime) ? media.currentTime : 0;
       if (current >= startTime + minAdvance) return;
       qishuiStartStall = isQishuiTrackStartStalled(song, opts, media, startTime, current);
@@ -240,6 +317,7 @@ function schedulePlaybackStallRecovery(reason, opts) {
         resumeAt: qishuiStartStall ? qishuiTrackStartResumeSeconds(media, current, startTime) : (current || startTime),
         silent: opts.silent
       });
+      if (!playbackStallRecoveryOwnerStillCurrent(media, src, token, recoverySerial, queueKey)) return;
       if (!recovered && qishuiStartStall) showQishuiTrackStartStallNotice();
     }, delayMs);
     playbackResumeRecovery.timerIds.push(timerId);
@@ -294,6 +372,10 @@ async function completeAudioPlayStart(opts, reason, expectedMedia, expectedToken
   playing = true; setPlayIcon(true);
   if (typeof markStageLyricsPlaybackResume === 'function') markStageLyricsPlaybackResume(reason || 'playback-started');
   if (opts.trackSwitch) primeCinemaAfterTrackStart(reason || 'track-switch');
+  if (opts.trackSwitch && !opts.resumeRecovery && typeof resetPlaybackFreshUrlRecoveryBudget === 'function') {
+    var startedSong = playQueue && currentIdx >= 0 && currentIdx < playQueue.length ? playQueue[currentIdx] : null;
+    resetPlaybackFreshUrlRecoveryBudget(startedSong);
+  }
   schedulePlaybackAnalyserRecovery(reason || 'playback-started');
   if (opts.fade !== false) startPlaybackFadeIn();
   else if (!opts.preserveGain) restorePlaybackGain();

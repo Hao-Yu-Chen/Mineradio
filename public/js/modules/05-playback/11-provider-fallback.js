@@ -46,11 +46,21 @@ function playbackRestrictionCategory(song, data) {
   var mergedStatus = Object.assign({}, status, data || {}, data && data.restriction || {});
   var loggedIn = !!(status.loggedIn || data && data.loggedIn);
   var vipLevel = typeof providerVipLevel === 'function' ? providerVipLevel(provider, mergedStatus) : 'none';
+  var membershipUnknown = !!(
+    provider === 'qq'
+    && loggedIn
+    && (
+      status.membershipKnown === false
+      || status.membershipStale
+      || status.authorizationIncomplete
+      || status.vipSyncState === 'unknown'
+    )
+  );
   var vipLocked = playbackRestrictionLooksVipLocked(song, data);
   if (vipLocked && !playbackRestrictionMissingPlaybackKey(data)) {
-    if (category === 'login_required' && loggedIn && vipLevel === 'none') return 'vip_required';
+    if (category === 'login_required' && loggedIn && vipLevel === 'none' && !membershipUnknown) return 'vip_required';
     if (!category || category === 'url_unavailable' || category === 'copyright_unavailable') {
-      if (loggedIn && vipLevel === 'none') return 'vip_required';
+      if (loggedIn && vipLevel === 'none' && !membershipUnknown) return 'vip_required';
     }
   }
   if (!category && data && data.error && /401|403|login_required|auth|cookie|credential|unauthorized|forbidden/i.test(String(data.error))) return loggedIn && vipLocked ? 'vip_required' : 'login_required';
@@ -63,6 +73,16 @@ function playbackProviderMembershipText(provider, data) {
   var level = typeof providerVipLevel === 'function' ? providerVipLevel(provider, mergedStatus) : 'none';
   if (level === 'svip') return 'SVIP';
   if (level === 'vip') return provider === 'spotify' ? 'Premium' : 'VIP';
+  if (
+    provider === 'qq'
+    && status.loggedIn
+    && (
+      status.membershipKnown === false
+      || status.membershipStale
+      || status.authorizationIncomplete
+      || status.vipSyncState === 'unknown'
+    )
+  ) return '会员待同步';
   return '普通账号';
 }
 function playbackRestrictionNotice(song, data) {
@@ -73,11 +93,21 @@ function playbackRestrictionNotice(song, data) {
   var providerKey = playbackLoginProvider(song);
   var status = platformStatus(providerKey) || {};
   var loggedIn = !!(status.loggedIn || data.loggedIn);
+  var membershipPending = !!(
+    providerKey === 'qq'
+    && loggedIn
+    && (
+      status.membershipKnown === false
+      || status.membershipStale
+      || status.authorizationIncomplete
+      || status.vipSyncState === 'unknown'
+    )
+  );
   var membership = playbackProviderMembershipText(providerKey, data);
   var message = data.message || restriction.message || '';
   if (category === 'vip_required' || category === 'paid_required' || category === 'trial_only') {
     var needText = category === 'paid_required' ? '购买、数字专辑或更高权限' : (category === 'trial_only' ? '完整播放权限' : '会员权限');
-    var title = loggedIn ? '当前平台没有会员状态' : '当前平台未登录会员';
+    var title = membershipPending ? 'QQ 会员状态待同步' : (loggedIn ? '当前平台没有会员状态' : '当前平台未登录会员');
     var body = message || (provider + ' 已识别为会员/付费曲目，当前状态是 ' + membership + '，缺少' + needText + '。');
     if (loggedIn && body.indexOf('当前状态') < 0) body += ' 当前状态是 ' + membership + '。';
     return { category: category, title: title, body: body + ' 可以登录会员账号、降低音质或切换到其它音源。', action: 'upgrade', toast: title };
@@ -271,6 +301,158 @@ function isSameTitleArtist(source, candidate) {
 }
 var SOURCE_FALLBACK_SEARCH_TIMEOUT_MS = 6500;
 var SOURCE_FALLBACK_DIRECT_PROVIDERS = ['netease', 'qq', 'kugou'];
+var SOURCE_FALLBACK_RECOVERY_TIMEOUT_MS = 20000;
+var SOURCE_FALLBACK_MAX_QUEUE_ADVANCES = 2;
+var SOURCE_FALLBACK_MAX_PROVIDER_ATTEMPTS = 4;
+var sourceFallbackRecoverySerial = 0;
+var activeSourceFallbackRecovery = null;
+var sourceFallbackBudgetTimeoutResult = {};
+
+function sourceFallbackRecoveryContentKey(song) {
+  if (!song) return '';
+  var title = normalizeMatchText(song.name || song.title || '');
+  var artists = artistNameParts(song).sort().join(',');
+  if (title && artists) return title + '|' + artists;
+  return sourceFallbackSongKey(song);
+}
+function sourceFallbackRecoveryFromOptions(opts) {
+  if (!opts) return null;
+  return opts.sourceFallbackRecovery
+    || (opts.playbackOpts && opts.playbackOpts.sourceFallbackRecovery)
+    || null;
+}
+function sourceFallbackRecoveryIdentityActive(recovery) {
+  return !!(
+    recovery
+    && activeSourceFallbackRecovery === recovery
+    && !recovery.terminal
+    && !recovery.cancelled
+    && !recovery.completed
+  );
+}
+function sourceFallbackRecoveryRemainingMs(recovery) {
+  if (!sourceFallbackRecoveryIdentityActive(recovery)) return 0;
+  return Math.max(0, Number(recovery.deadlineAt) - Date.now());
+}
+function sourceFallbackRecoveryCanContinue(recovery) {
+  return sourceFallbackRecoveryRemainingMs(recovery) > 0;
+}
+function cancelSourceFallbackRecovery(reason) {
+  var recovery = activeSourceFallbackRecovery;
+  if (!recovery || recovery.terminal || recovery.completed) return false;
+  recovery.cancelled = true;
+  recovery.cancelReason = String(reason || 'superseded');
+  activeSourceFallbackRecovery = null;
+  return true;
+}
+function completeSourceFallbackRecovery(recovery) {
+  if (!recovery || recovery.terminal || recovery.cancelled) return false;
+  recovery.completed = true;
+  if (activeSourceFallbackRecovery === recovery) activeSourceFallbackRecovery = null;
+  return true;
+}
+function beginSourceFallbackPlaybackInvocation(opts) {
+  var recovery = sourceFallbackRecoveryFromOptions(opts);
+  if (!recovery) {
+    cancelSourceFallbackRecovery('new-root-playback');
+    return true;
+  }
+  return sourceFallbackRecoveryCanContinue(recovery);
+}
+function ensureSourceFallbackRecovery(opts, song, idx, token) {
+  var recovery = sourceFallbackRecoveryFromOptions(opts);
+  if (recovery) return sourceFallbackRecoveryIdentityActive(recovery) ? recovery : null;
+  cancelSourceFallbackRecovery('new-recovery');
+  recovery = {
+    id: 'source-fallback-' + Date.now() + '-' + (++sourceFallbackRecoverySerial),
+    startedAt: Date.now(),
+    deadlineAt: Date.now() + SOURCE_FALLBACK_RECOVERY_TIMEOUT_MS,
+    rootIndex: idx,
+    rootToken: token,
+    queueAdvances: 0,
+    providerAttempts: 0,
+    silent: !!(opts && opts.startupAutoplay),
+    visitedSongKeys: Object.create(null),
+    attemptedProviderKeys: Object.create(null),
+    terminal: false,
+    cancelled: false,
+    completed: false
+  };
+  var songKey = sourceFallbackRecoveryContentKey(song);
+  if (songKey) recovery.visitedSongKeys[songKey] = true;
+  activeSourceFallbackRecovery = recovery;
+  return recovery;
+}
+function sourceFallbackQueuePlaybackOptions(opts, recovery) {
+  var next = Object.assign({}, opts || {});
+  delete next.fallbackOriginalSong;
+  delete next.fallbackCandidateSong;
+  delete next.preResolvedPlaybackData;
+  delete next.preloadedAudio;
+  delete next.preloadedData;
+  delete next.preloadedProxyAudioUrl;
+  next.fallbackDepth = 0;
+  next.sourceFallbackRecovery = recovery;
+  return next;
+}
+function sourceFallbackRecoveryFailureOptions(opts) {
+  var recovery = sourceFallbackRecoveryFromOptions(opts);
+  if (!recovery) return null;
+  return {
+    silent: !!recovery.silent,
+    playbackOpts: sourceFallbackQueuePlaybackOptions(opts, recovery),
+    sourceFallbackRecovery: recovery
+  };
+}
+function settleExpiredSourceFallbackPlayback(idx, token, opts, message) {
+  var recovery = sourceFallbackRecoveryFromOptions(opts);
+  if (!sourceFallbackRecoveryIdentityActive(recovery)) return false;
+  if (opts && opts.fallbackOriginalSong && opts.fallbackCandidateSong) {
+    restoreSourceFallbackQueueItem(idx, opts.fallbackOriginalSong, opts.fallbackCandidateSong, token);
+  }
+  return settleSourceFallbackTerminal(
+    currentIdx,
+    trackSwitchToken,
+    message || '自动恢复已达到时间上限，请稍后手动重试。',
+    sourceFallbackRecoveryFailureOptions(opts) || { sourceFallbackRecovery: recovery }
+  );
+}
+function sourceFallbackProviderAttemptKey(recovery, song, provider) {
+  return (sourceFallbackRecoveryContentKey(song) || sourceFallbackSongKey(song)) + '|' + normalizePlaybackProvider(provider);
+}
+function beginSourceFallbackProviderAttempt(recovery, song, provider) {
+  if (!sourceFallbackRecoveryCanContinue(recovery)) return false;
+  var key = sourceFallbackProviderAttemptKey(recovery, song, provider);
+  if (recovery.attemptedProviderKeys[key]) return false;
+  if (recovery.providerAttempts >= SOURCE_FALLBACK_MAX_PROVIDER_ATTEMPTS) return false;
+  recovery.attemptedProviderKeys[key] = true;
+  recovery.providerAttempts++;
+  return true;
+}
+function awaitSourceFallbackBudget(promise, recovery) {
+  if (!recovery) return Promise.resolve(promise);
+  var remaining = sourceFallbackRecoveryRemainingMs(recovery);
+  if (remaining <= 0) return Promise.resolve(sourceFallbackBudgetTimeoutResult);
+  return new Promise(function (resolve, reject) {
+    var settled = false;
+    var timer = setTimeout(function () {
+      if (settled) return;
+      settled = true;
+      resolve(sourceFallbackBudgetTimeoutResult);
+    }, remaining);
+    Promise.resolve(promise).then(function (value) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(value);
+    }, function (error) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(error);
+    });
+  });
+}
 
 function sourceFallbackProviderTitle(provider) {
   if (provider === 'qq') return 'QQ 音乐';
@@ -303,9 +485,10 @@ function alternatePlaybackProviders(song) {
 function alternatePlaybackProvider(song) {
   return alternatePlaybackProviders(song)[0] || '';
 }
-async function searchAlternatePlatformSong(song, requestedTarget) {
+async function searchAlternatePlatformSong(song, requestedTarget, recovery) {
   var target = requestedTarget || alternatePlaybackProvider(song);
   if (!target || !sourceFallbackProviderReady(target)) return null;
+  if (recovery && !sourceFallbackRecoveryCanContinue(recovery)) return null;
   var artist = artistNameParts(song)[0] || '';
   var query = [song.name || song.title || '', song.artist || artist].filter(Boolean).join(' ').trim();
   if (!query) return null;
@@ -314,7 +497,11 @@ async function searchAlternatePlatformSong(song, requestedTarget) {
     : (target === 'kugou'
       ? '/api/kugou/search?keywords=' + encodeURIComponent(query) + '&limit=8'
       : '/api/search?keywords=' + encodeURIComponent(query) + '&limit=12');
-  var data = await apiJson(url, { timeoutMs: SOURCE_FALLBACK_SEARCH_TIMEOUT_MS });
+  var data = await awaitSourceFallbackBudget(
+    apiJson(url, { timeoutMs: SOURCE_FALLBACK_SEARCH_TIMEOUT_MS }),
+    recovery
+  );
+  if (data === sourceFallbackBudgetTimeoutResult || (recovery && !sourceFallbackRecoveryCanContinue(recovery))) return null;
   var list = data && (data.songs || data.result || []);
   for (var i = 0; i < list.length; i++) {
     if (typeof sourceCandidateRejectReason === 'function' && sourceCandidateRejectReason(song, list[i], target)) continue;
@@ -343,11 +530,25 @@ function restoreSourceFallbackQueueItem(idx, originalSong, candidateSong, expect
 }
 function settleSourceFallbackTerminal(idx, token, message, opts) {
   opts = opts || {};
+  var recovery = sourceFallbackRecoveryFromOptions(opts);
+  if (token !== trackSwitchToken || currentIdx !== idx) return false;
+  if (recovery) {
+    if (!sourceFallbackRecoveryIdentityActive(recovery)) return false;
+    recovery.terminal = true;
+    recovery.terminalAt = Date.now();
+    if (activeSourceFallbackRecovery === recovery) activeSourceFallbackRecovery = null;
+  }
   hideLoading();
   forcePlaybackControlsInteractive();
-  if (token !== trackSwitchToken || currentIdx !== idx) return false;
   playToggleBusy = false;
-  markQueueItemPlaybackFailed(idx);
+  markQueueItemPlaybackFailed(idx, recovery);
+  if (typeof clearAlbumGaplessPreload === 'function') clearAlbumGaplessPreload('source-fallback-terminal');
+  if (typeof resetCuefieldAutoMix === 'function') resetCuefieldAutoMix('source-fallback-terminal');
+  if (typeof clearPlaybackResumeWatchdogs === 'function') clearPlaybackResumeWatchdogs();
+  if (typeof playbackResumeRecovery !== 'undefined' && playbackResumeRecovery) {
+    playbackResumeRecovery.serial = (Number(playbackResumeRecovery.serial) || 0) + 1;
+    playbackResumeRecovery.pending = false;
+  }
   if (audio) {
     try {
       audioFadeSerial++;
@@ -356,6 +557,7 @@ function settleSourceFallbackTerminal(idx, token, message, opts) {
       audio.pause();
       audio.removeAttribute('src');
       audio.__mineradioQueueItemKey = '';
+      audio.__mineradioTrackSwitchToken = 0;
       audio.load();
     } catch (e) { }
   }
@@ -365,15 +567,18 @@ function settleSourceFallbackTerminal(idx, token, message, opts) {
   if (!opts.silent) showSourceFallbackNotice('当前没有可用音源', message || '当前歌曲不可播放，并且没有其它已登录、已授权的音源可接管。');
   return false;
 }
-function markQueueItemPlaybackFailed(idx) {
-  if (playQueue[idx]) playQueue[idx]._lastPlaybackFailAt = Date.now();
+function markQueueItemPlaybackFailed(idx, recovery) {
+  if (!playQueue[idx]) return;
+  playQueue[idx]._lastPlaybackFailAt = Date.now();
+  playQueue[idx]._lastPlaybackFailRecoveryId = recovery && recovery.id ? recovery.id : '';
 }
 var MAX_RECENT_AUTO_QUEUE_FAILURES = 12;
-function recentQueuePlaybackFailureCount() {
+function recentQueuePlaybackFailureCount(recovery) {
   var now = Date.now();
   var count = 0;
   for (var index = 0; index < playQueue.length; index++) {
     var failedAt = Number(playQueue[index] && playQueue[index]._lastPlaybackFailAt) || 0;
+    if (recovery && playQueue[index] && playQueue[index]._lastPlaybackFailRecoveryId !== recovery.id) continue;
     if (failedAt && now - failedAt <= 18000) {
       count++;
       if (count >= MAX_RECENT_AUTO_QUEUE_FAILURES) break;
@@ -381,12 +586,16 @@ function recentQueuePlaybackFailureCount() {
   }
   return count;
 }
-function nextUnblockedQueueIndex(idx) {
+function nextUnblockedQueueIndex(idx, recovery) {
   var now = Date.now();
   for (var step = 1; step < playQueue.length; step++) {
     var nextIdx = (idx + step) % playQueue.length;
     var failedAt = Number(playQueue[nextIdx] && playQueue[nextIdx]._lastPlaybackFailAt) || 0;
-    if (!failedAt || now - failedAt > 18000) return nextIdx;
+    var recoveryKey = sourceFallbackRecoveryContentKey(playQueue[nextIdx]);
+    if (recovery && recoveryKey && recovery.visitedSongKeys[recoveryKey]) continue;
+    var failedInRecovery = !recovery
+      || (playQueue[nextIdx] && playQueue[nextIdx]._lastPlaybackFailRecoveryId === recovery.id);
+    if (!failedInRecovery || !failedAt || now - failedAt > 18000) return nextIdx;
   }
   return -1;
 }
@@ -396,41 +605,74 @@ function isQueueItemRecentlyPlaybackFailed(idx) {
 }
 async function skipFailedQueueItem(idx, token, message, opts) {
   opts = opts || {};
-  hideLoading();
   if (token !== trackSwitchToken) return false;
-  markQueueItemPlaybackFailed(idx);
+  var recovery = ensureSourceFallbackRecovery(opts, playQueue[idx], idx, token);
+  if (!recovery) return false;
+  var terminalOpts = Object.assign({}, opts, { sourceFallbackRecovery: recovery });
+  if (!sourceFallbackRecoveryCanContinue(recovery)) {
+    return settleSourceFallbackTerminal(idx, token, '自动恢复已达到时间上限，请稍后手动重试。', terminalOpts);
+  }
+  hideLoading();
+  markQueueItemPlaybackFailed(idx, recovery);
+  var currentRecoveryKey = sourceFallbackRecoveryContentKey(playQueue[idx]);
+  if (currentRecoveryKey) recovery.visitedSongKeys[currentRecoveryKey] = true;
   if (playQueue.length <= 1) {
-    return settleSourceFallbackTerminal(idx, token, message || '当前歌曲不可播放，队列里没有其他歌曲。', opts);
+    return settleSourceFallbackTerminal(idx, token, message || '当前歌曲不可播放，队列里没有其他歌曲。', terminalOpts);
   }
-  if (recentQueuePlaybackFailureCount() >= Math.min(MAX_RECENT_AUTO_QUEUE_FAILURES, playQueue.length)) {
-    return settleSourceFallbackTerminal(idx, token, '', opts);
+  if (recentQueuePlaybackFailureCount(recovery) >= Math.min(MAX_RECENT_AUTO_QUEUE_FAILURES, playQueue.length)) {
+    return settleSourceFallbackTerminal(idx, token, '', terminalOpts);
   }
-  var nextIdx = nextUnblockedQueueIndex(idx);
+  if (recovery.queueAdvances >= SOURCE_FALLBACK_MAX_QUEUE_ADVANCES) {
+    return settleSourceFallbackTerminal(idx, token, '已停止自动切换，避免无可用音源时反复扫描整条队列。', terminalOpts);
+  }
+  var nextIdx = nextUnblockedQueueIndex(idx, recovery);
   if (nextIdx < 0) {
-    return settleSourceFallbackTerminal(idx, token, '已尝试绕开受限歌曲，当前队列没有新的可播放项。', opts);
+    return settleSourceFallbackTerminal(idx, token, '已尝试绕开受限歌曲，当前队列没有新的可播放项。', terminalOpts);
   }
   if (!opts.silent) showSourceFallbackNotice('已跳过受限歌曲', message || '未找到同名同歌手的另一个平台版本，正在播放下一首。');
-  var nextPlaybackOpts = Object.assign({}, opts.playbackOpts || { fallbackDepth: 0 }, { skipShuffleOrder: true });
+  recovery.queueAdvances++;
+  var nextRecoveryKey = sourceFallbackRecoveryContentKey(playQueue[nextIdx]);
+  if (nextRecoveryKey) recovery.visitedSongKeys[nextRecoveryKey] = true;
+  var nextPlaybackOpts = Object.assign(
+    {},
+    sourceFallbackQueuePlaybackOptions(opts.playbackOpts || {}, recovery),
+    { skipShuffleOrder: true }
+  );
   var nextStarted = await playQueueAt(nextIdx, nextPlaybackOpts);
+  if (nextStarted === true) completeSourceFallbackRecovery(recovery);
+  else if (sourceFallbackRecoveryIdentityActive(recovery) && !sourceFallbackRecoveryCanContinue(recovery)) {
+    return settleSourceFallbackTerminal(currentIdx, trackSwitchToken, '自动恢复已达到时间上限，请稍后手动重试。', terminalOpts);
+  }
   return nextStarted === true;
 }
 async function tryAutoPlaybackFallback(song, data, idx, token, opts) {
   opts = opts || {};
-  var skipPlaybackOpts = { fallbackDepth: 0, startupAutoplay: true };
-  if (opts.resumeAt != null) skipPlaybackOpts.resumeAt = opts.resumeAt;
-  var skipOpts = opts.startupAutoplay ? { silent: true, playbackOpts: skipPlaybackOpts } : null;
   if (opts.fallbackDepth > 0) {
     if (opts.fallbackOriginalSong && opts.fallbackCandidateSong) {
       restoreSourceFallbackQueueItem(idx, opts.fallbackOriginalSong, opts.fallbackCandidateSong, token);
     }
-    return await skipFailedQueueItem(idx, token, '自动换源后的版本仍不可播，正在播放下一首。', skipOpts);
+    return false;
   }
   if (!song || song.type === 'local' || song.type === 'podcast' || song.source === 'podcast') return null;
   var category = playbackRestrictionCategory(song, data);
   var fromLabel = playbackProviderLabel(song);
   var alternateProviders = alternatePlaybackProviders(song);
+  if (!alternateProviders.length && category === 'login_required') return null;
+  var recovery = ensureSourceFallbackRecovery(opts, song, idx, token);
+  if (!recovery) return false;
+  opts = Object.assign({}, opts, { sourceFallbackRecovery: recovery });
+  var skipPlaybackOpts = sourceFallbackQueuePlaybackOptions(opts, recovery);
+  skipPlaybackOpts.startupAutoplay = true;
+  if (opts.resumeAt != null) skipPlaybackOpts.resumeAt = opts.resumeAt;
+  var skipOpts = {
+    silent: !!recovery.silent,
+    playbackOpts: skipPlaybackOpts,
+    sourceFallbackRecovery: recovery
+  };
+  if (!sourceFallbackRecoveryCanContinue(recovery)) {
+    return settleSourceFallbackTerminal(idx, token, '自动恢复已达到时间上限，请稍后手动重试。', skipOpts);
+  }
   if (!alternateProviders.length) {
-    if (category === 'login_required') return null;
     return await skipFailedQueueItem(idx, token, '当前歌曲不可播放，且没有其它已登录、已授权的音乐平台可接管。', skipOpts);
   }
   if (!opts.startupAutoplay) {
@@ -438,15 +680,27 @@ async function tryAutoPlaybackFallback(song, data, idx, token, opts) {
   }
   for (var providerIndex = 0; providerIndex < alternateProviders.length; providerIndex++) {
     var alternateProvider = alternateProviders[providerIndex];
+    if (!beginSourceFallbackProviderAttempt(recovery, song, alternateProvider)) {
+      if (!sourceFallbackRecoveryCanContinue(recovery)) {
+        return settleSourceFallbackTerminal(idx, token, '自动恢复已达到时间上限，请稍后手动重试。', skipOpts);
+      }
+      continue;
+    }
     var targetLabel = sourceFallbackProviderTitle(alternateProvider);
     try {
-      var alternate = await searchAlternatePlatformSong(song, alternateProvider);
+      var alternate = await searchAlternatePlatformSong(song, alternateProvider, recovery);
       if (token !== trackSwitchToken) return false;
+      if (!sourceFallbackRecoveryCanContinue(recovery)) {
+        return settleSourceFallbackTerminal(idx, token, '自动恢复已达到时间上限，请稍后手动重试。', skipOpts);
+      }
       if (!alternate) continue;
       var alternateData = typeof resolveAlbumGaplessPlaybackData === 'function'
-        ? await resolveAlbumGaplessPlaybackData(alternate)
+        ? await awaitSourceFallbackBudget(resolveAlbumGaplessPlaybackData(alternate), recovery)
         : null;
       if (token !== trackSwitchToken) return false;
+      if (alternateData === sourceFallbackBudgetTimeoutResult || !sourceFallbackRecoveryCanContinue(recovery)) {
+        return settleSourceFallbackTerminal(idx, token, '自动恢复已达到时间上限，请稍后手动重试。', skipOpts);
+      }
       if (!alternateData || !alternateData.url) continue;
       var originalSong = playQueue[idx];
       alternate.autoFallbackFrom = songProviderKey(song);
@@ -462,6 +716,7 @@ async function tryAutoPlaybackFallback(song, data, idx, token, opts) {
         preResolvedPlaybackData: alternateData,
         fallbackOriginalSong: originalSong,
         fallbackCandidateSong: committedCandidate,
+        sourceFallbackRecovery: recovery,
         qqQualityTried: ['hires', 'lossless', 'exhigh', 'standard']
       };
       if (opts.resumeAt != null) fallbackPlaybackOpts.resumeAt = opts.resumeAt;
@@ -470,13 +725,20 @@ async function tryAutoPlaybackFallback(song, data, idx, token, opts) {
       var fallbackStarted = await fallbackPromise;
       if (fallbackToken !== trackSwitchToken) return false;
       if (fallbackStarted === true) {
+        completeSourceFallbackRecovery(recovery);
         if (!opts.startupAutoplay) showSourceFallbackNotice('已自动切换音源', (song.name || '当前歌曲') + ' 已从 ' + fromLabel + ' 切到 ' + targetLabel + '。');
         return true;
       }
       restoreSourceFallbackQueueItem(idx, originalSong, committedCandidate, fallbackToken);
       token = fallbackToken;
+      if (!sourceFallbackRecoveryCanContinue(recovery)) {
+        return settleSourceFallbackTerminal(idx, token, '自动恢复已达到时间上限，请稍后手动重试。', skipOpts);
+      }
     } catch (e) {
       if (token !== trackSwitchToken) return false;
+      if (!sourceFallbackRecoveryCanContinue(recovery)) {
+        return settleSourceFallbackTerminal(idx, token, '自动恢复已达到时间上限，请稍后手动重试。', skipOpts);
+      }
       console.warn('[SourceFallback]', alternateProvider, e && (e.message || e));
     }
   }

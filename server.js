@@ -65,6 +65,13 @@ const { fileURLToPath } = require('url');
 const { analyzePodcastDjStream, analyzePodcastDjIntro } = require('./dj-analyzer');
 const { TrackDecryptor } = require('./qishui-audio-decryptor/track-decryptor');
 const {
+  normalizeQQVipPayload: normalizeQQVipPayloadStrict,
+  resolveQQVipFromProbes,
+  qqVipSessionCacheKey,
+  qqVipCacheTtlMs,
+  qqVipObjectLooksExpired: qqVipObjectLooksExpiredStrict,
+} = require('./qq-vip-api');
+const {
   handleKugouSearch,
   handleKugouSongUrl,
   handleKugouLyric,
@@ -156,7 +163,7 @@ const CUEFIELD_FEEDBACK_FILE = process.env.CUEFIELD_FEEDBACK_FILE || path.join(_
 const LISTEN_SYNC_JOURNAL_FILE = process.env.MINERADIO_LISTEN_SYNC_FILE || path.join(__dirname, 'data', 'listen-sync-journal.json');
 const LISTEN_SYNC_JOURNAL_LIMIT = 600;
 const APP_PACKAGE = readPackageInfo();
-const APP_VERSION = process.env.MINERADIO_VERSION || APP_PACKAGE.version || '2.0.1';
+const APP_VERSION = process.env.MINERADIO_VERSION || APP_PACKAGE.version || '2.0.2';
 const UPDATE_CONFIG = readUpdateConfig(APP_PACKAGE);
 const PATCH_MAX_BYTES = 12 * 1024 * 1024;
 const PATCH_ALLOWED_ROOTS = new Set(['public', 'desktop', 'build']);
@@ -368,6 +375,7 @@ function saveCookie(c) {
 let qqCookie = '';
 function saveQQCookie(c) {
   qqCookie = saveConfiguredCookieStore(configuredCookieStores.qq, normalizeCookieHeader(c) || rawCookieFallback(c));
+  qqVipInfoCache.clear();
   clearQQLikedPlaylistCoverCache();
 }
 
@@ -401,6 +409,7 @@ function clearAllRuntimeLoginCredentials(reason) {
     configuredCookieStores[key].value = '';
   });
   clearNeteaseLoginInfoCache();
+  qqVipInfoCache.clear();
   clearQQLikedPlaylistCoverCache();
   const qishui = clearQishuiAccessToken();
   const spotify = clearSpotifyToken();
@@ -3207,118 +3216,63 @@ async function qqMusicRequest(payload, opts) {
   return parseJSONText(text);
 }
 
-const QQ_VIP_TYPE_KEYS = [
-  'vipType', 'vip_type', 'viptype', 'vipLevel', 'vip_level', 'level',
-  'music_vip_level', 'musicVipLevel', 'green_vip_level', 'greenVipLevel',
-  'green_level', 'greenLevel', 'vipStatus', 'vip_status', 'vipFlag', 'vipflag',
-];
-const QQ_SVIP_TYPE_KEYS = [
-  'svipType', 'svip_type', 'superVipType', 'super_vip_type',
-  'superVipLevel', 'super_vip_level', 'luxury_vip_level', 'luxuryVipLevel',
-  'super_vip', 'superVip', 'svip', 'greenSvip', 'green_svip',
-];
-const QQ_VIP_FLAG_KEYS = [
-  'isVip', 'is_vip', 'vip', 'vipFlag', 'vipflag', 'isGreenVip',
-  'is_green_vip', 'greenVip', 'green_vip', 'isMember', 'is_member',
-  'member', 'opened', 'active', 'valid',
-];
-const QQ_SVIP_FLAG_KEYS = [
-  'isSvip', 'is_svip', 'svip', 'superVip', 'super_vip', 'isSuperVip',
-  'is_super_vip', 'luxuryVip', 'luxury_vip', 'isLuxuryVip', 'is_luxury_vip',
-];
-
-function collectQQVipObjects(value, out, depth, pathText) {
-  if (depth > 6 || value == null || typeof value !== 'object') return out;
-  const keys = Object.keys(value);
-  const looksVip = /vip|svip|member|green|luxury|associator|privilege|right|package|expire/i.test((pathText || '') + ' ' + keys.join(' '));
-  if (looksVip) out.push(value);
-  keys.forEach(key => collectQQVipObjects(value[key], out, depth + 1, (pathText || '') + ' ' + key));
-  return out;
-}
-
-function collectQQVipExpiryValues(value, out, depth) {
-  if (depth > 4 || value == null || typeof value !== 'object') return out;
-  Object.keys(value).forEach(key => {
-    const child = value[key];
-    if (/expire|expiry|end[_-]?time|valid[_-]?time|deadline|due/i.test(key)) {
-      const n = Number(child);
-      if (Number.isFinite(n) && n > 0) out.push(n < 10000000000 ? n * 1000 : n);
-    }
-    if (child && typeof child === 'object') collectQQVipExpiryValues(child, out, depth + 1);
-  });
-  return out;
-}
-
 function qqVipObjectLooksExpired(obj) {
-  const values = collectQQVipExpiryValues(obj, [], 0).filter(n => n > 946684800000);
-  if (!values.length) return false;
-  return Math.max(...values) < Date.now() - 60 * 1000;
-}
-
-function qqVipFlagEnabled(obj, keys) {
-  if (!obj || typeof obj !== 'object') return false;
-  return keys.some(key => {
-    const value = obj[key];
-    if (value === true) return true;
-    const n = Number(value);
-    if (Number.isFinite(n) && n > 0) return true;
-    const text = String(value || '').trim().toLowerCase();
-    if (!text || text === '0' || text === 'false' || text === 'none' || text === 'normal' || text === 'expired') return false;
-    return /^(true|yes|active|valid|vip|svip|premium)$/.test(text) || /已开通|有效|会员|绿钻|豪华/.test(text);
-  });
+  return qqVipObjectLooksExpiredStrict(obj);
 }
 
 function normalizeQQVipPayload(payload, fallback) {
-  fallback = fallback || {};
-  const candidates = collectQQVipObjects(payload, [], 0, '');
-  const activeCandidates = candidates.filter(obj => !qqVipObjectLooksExpired(obj));
-  const allCandidatesExpired = candidates.length > 0 && activeCandidates.length === 0 && candidates.some(obj => qqVipObjectLooksExpired(obj));
-  const objects = allCandidatesExpired ? [] : (activeCandidates.length ? activeCandidates : candidates);
-  const fallbackVipType = Number(fallback.vipType || fallback.vip_type || 0) || 0;
-  const fallbackSvipType = Number(fallback.svipType || fallback.svip_type || 0) || 0;
-  const vipType = firstPositiveNumberFrom(objects, QQ_VIP_TYPE_KEYS) || fallbackVipType;
-  const svipType = firstPositiveNumberFrom(objects, QQ_SVIP_TYPE_KEYS) || fallbackSvipType;
-  let vipText = '';
-  try { vipText = collectVipStringValues(payload, [], 0).join(' ').toLowerCase(); } catch (_) {}
-  const negativeText = /无vip|非会员|普通用户|普通账号|未开通|已过期|过期|expired|not\s+vip/.test(vipText);
-  const svipText = /svip|supervip|super_vip|豪华绿钻|超级会员|超级vip|绿钻豪华/.test(vipText);
-  const vipTextPositive = !negativeText && /vip|premium|会员|绿钻|已开通|有效期内|豪华/.test(vipText);
-  const isSvip = svipType > 0 || objects.some(obj => qqVipFlagEnabled(obj, QQ_SVIP_FLAG_KEYS)) || svipText || !!fallback.isSvip;
-  const isVip = isSvip || vipType > 0 || objects.some(obj => qqVipFlagEnabled(obj, QQ_VIP_FLAG_KEYS)) || vipTextPositive || !!fallback.isVip;
-  const vipLevel = isSvip ? 'svip' : (isVip ? 'vip' : 'none');
-  const resolved = candidates.length > 0 || vipType > 0 || svipType > 0 || !!vipText || !!fallback.isVip || !!fallback.isSvip;
-  return {
-    vipType,
-    svipType,
-    vipLevel,
-    isVip,
-    isSvip,
-    vipLabel: vipLevel === 'svip' ? 'SVIP' : (vipLevel === 'vip' ? 'VIP' : '无VIP'),
-    resolved,
-  };
+  return normalizeQQVipPayloadStrict(payload, fallback || {});
 }
 
 function withQQVipSyncState(info, probeAvailable) {
   info = info || {};
   const authIncomplete = !!(info.loggedIn && !info.playbackKeyReady);
-  const membershipStale = !!(info.loggedIn && (authIncomplete || (info.profileUnavailable && !probeAvailable)));
+  const membershipUnknown = !!(info.loggedIn && info.membershipKnown !== true);
+  const membershipStale = !!(info.loggedIn && (
+    authIncomplete
+    || membershipUnknown
+    || (info.profileUnavailable && !probeAvailable)
+  ));
   return {
     ...info,
     membershipStale,
     authorizationIncomplete: authIncomplete,
-    vipSyncState: authIncomplete ? 'authorization_incomplete' : (probeAvailable ? 'checked' : (membershipStale ? 'stale' : 'profile')),
+    vipSyncState: authIncomplete
+      ? 'authorization_incomplete'
+      : (membershipUnknown ? 'unknown' : (probeAvailable ? 'checked' : (membershipStale ? 'stale' : 'profile'))),
   };
 }
 
 function mergeQQVipStatus(info, vip, source) {
   info = info || {};
-  if (!vip || !vip.resolved) {
+  const profilePositive = !!(
+    info.isVip ||
+    info.isSvip ||
+    info.vipLevel === 'vip' ||
+    info.vipLevel === 'svip' ||
+    Number(info.vipType || 0) > 0 ||
+    Number(info.svipType || 0) > 0
+  );
+  const probeKnown = !!(vip && vip.resolved && vip.membershipKnown !== false);
+  if (!probeKnown) {
     return withQQVipSyncState({
       ...info,
       vipCheckedAt: Date.now(),
       vipProbeAvailable: false,
       vipSource: info.vipSource || 'profile',
     }, false);
+  }
+  // A verified positive profile result wins over a stale ordinary response
+  // returned by one of QQ's replicated VIP query endpoints.
+  if (profilePositive && !vip.isVip) {
+    return withQQVipSyncState({
+      ...info,
+      membershipKnown: true,
+      vipCheckedAt: Date.now(),
+      vipProbeAvailable: true,
+      vipEvidenceConflict: true,
+      vipSource: info.vipSource || 'qq-profile-vip',
+    }, true);
   }
   if (info.loggedIn && info.playbackKeyReady === false && !vip.isVip) {
     return withQQVipSyncState({
@@ -3336,6 +3290,8 @@ function mergeQQVipStatus(info, vip, source) {
     isVip: !!vip.isVip,
     isSvip: !!vip.isSvip,
     vipLabel: vip.vipLabel || (vip.isVip ? 'VIP' : '无VIP'),
+    membershipKnown: true,
+    expiresAt: Number(vip.expiresAt) || 0,
     vipCheckedAt: Date.now(),
     vipProbeAvailable: true,
     vipSource: source || vip.vipSource || 'qq-vip-probe',
@@ -3348,13 +3304,16 @@ async function fetchQQVipStatus(cookieObj, opts) {
   const uin = qqCookieUin(cookieObj);
   const musicKey = qqCookieMusicKey(cookieObj);
   if (!uin || !musicKey) return null;
-  const cached = qqVipInfoCache.get(uin);
-  if (!opts.force && cached && Date.now() - cached.at < QQ_VIP_INFO_CACHE_TTL_MS) return cached.value;
+  const cacheKey = qqVipSessionCacheKey(uin, musicKey, cookieObj);
+  const cached = cacheKey ? qqVipInfoCache.get(cacheKey) : null;
+  if (!opts.force && cached && Date.now() < cached.expiresAt) return cached.value;
   const comm = { uin, format: 'json', ct: 24, cv: 0 };
   if (musicKey) comm.authst = musicKey;
   const probes = [
     {
       source: 'qq-vip-query-v2-list',
+      responseKey: 'req_1',
+      uin: String(uin),
       body: {
         comm,
         req_1: {
@@ -3366,6 +3325,8 @@ async function fetchQQVipStatus(cookieObj, opts) {
     },
     {
       source: 'qq-vip-query-v1-list',
+      responseKey: 'req_1',
+      uin: String(uin),
       body: {
         comm,
         req_1: {
@@ -3377,6 +3338,8 @@ async function fetchQQVipStatus(cookieObj, opts) {
     },
     {
       source: 'qq-vip-query-v2-single',
+      responseKey: 'vip',
+      uin: String(uin),
       body: {
         comm,
         vip: {
@@ -3387,21 +3350,25 @@ async function fetchQQVipStatus(cookieObj, opts) {
       },
     },
   ];
-  let lastError = null;
-  for (const probe of probes) {
-    try {
-      const body = await qqMusicRequest(probe.body, { cookie: true, timeoutMs: 4200 });
-      const vip = normalizeQQVipPayload(body, {});
-      if (vip.resolved) {
-        const value = { ...vip, vipSource: probe.source, rawCode: normalizeApiCode(body) };
-        qqVipInfoCache.set(uin, { at: Date.now(), value });
-        return value;
-      }
-    } catch (e) {
-      lastError = e;
+  const value = await resolveQQVipFromProbes(probes, async probe => {
+    return qqMusicRequest(probe.body, { cookie: true, timeoutMs: 4200 });
+  });
+  if (value && value.resolved) {
+    const ttlMs = qqVipCacheTtlMs(value, {
+      positiveTtlMs: QQ_VIP_INFO_CACHE_TTL_MS,
+      negativeTtlMs: 30 * 1000,
+    });
+    if (cacheKey && ttlMs > 0) {
+      qqVipInfoCache.set(cacheKey, {
+        expiresAt: Date.now() + ttlMs,
+        value,
+      });
     }
+    return value;
   }
-  if (opts.force && lastError) console.warn('[QQLogin] VIP probe failed:', lastError.message);
+  if (opts.force && value && value.errorCount) {
+    console.warn('[QQLogin] VIP probe incomplete:', value.errorCount + '/' + probes.length);
+  }
   return null;
 }
 
@@ -3416,7 +3383,9 @@ function normalizeQQProfile(body, cookieObj) {
   const cookieNick = qqCookieNickname(cookieObj, uin);
   const nick = profileNick || cookieNick || '';
   const avatar = profileAvatar || qqCookieAvatar(cookieObj, uin);
-  const profileVip = normalizeQQVipPayload({ data, creator, vipInfo, cookie: cookieObj }, {});
+  // Cookie labels may survive a membership downgrade, so only current
+  // official profile fields are allowed to become profile membership proof.
+  const profileVip = normalizeQQVipPayload({ data, creator, vipInfo }, {});
   return {
     provider: 'qq',
     loggedIn: !!(uin && qqCookieMusicKey(cookieObj)),
@@ -3430,6 +3399,8 @@ function normalizeQQProfile(body, cookieObj) {
     isVip: !!profileVip.isVip,
     isSvip: !!profileVip.isSvip,
     vipLabel: profileVip.vipLabel || '无VIP',
+    membershipKnown: !!profileVip.membershipKnown,
+    expiresAt: Number(profileVip.expiresAt) || 0,
     hasCookie: !!qqCookie,
     playbackKeyReady: !!qqCookiePlaybackKey(cookieObj),
     profileSource: profileNick || profileAvatar ? 'qq-profile' : (cookieNick || avatar ? 'cookie' : 'fallback'),
@@ -4219,8 +4190,11 @@ function qqPlaybackMemberHints(hints) {
   );
 }
 
-const QQ_AUDIO_PROBE_TOTAL_MS = 8000;
-const QQ_AUDIO_PROBE_ATTEMPT_MS = 2400;
+// Keep the complete vkey + media verification path below the renderer's
+// 15-second QQ request deadline (6.0s + 6.2s, with ~2.8s response margin).
+const QQ_VKEY_REQUEST_TIMEOUT_MS = 6000;
+const QQ_AUDIO_PROBE_TOTAL_MS = 6200;
+const QQ_AUDIO_PROBE_ATTEMPT_MS = 2000;
 const AUDIO_URL_PROBE_BYTES = 8192;
 function audioProbeMagic(buffer) {
   if (!buffer || !buffer.length) return '';
@@ -4324,7 +4298,7 @@ async function handleQQSongUrl(mid, mediaMid, qualityPreference, playbackHints) 
       method: 'CgiGetVkey',
       param,
     },
-  }, { cookie: true });
+  }, { cookie: true, timeoutMs: QQ_VKEY_REQUEST_TIMEOUT_MS });
   const data = json && json.req_0 && json.req_0.data;
   const infos = (data && Array.isArray(data.midurlinfo)) ? data.midurlinfo : [];
   const purlInfos = infos.filter(item => item && item.purl);
@@ -4353,7 +4327,6 @@ async function handleQQSongUrl(mid, mediaMid, qualityPreference, playbackHints) 
   if (playableUrl && playableInfo) {
     const info = playableInfo;
     const fileMeta = fileCandidates.find(item => item.filename === info.filename) || {};
-    const playbackVipEvidence = memberTrackHint && hasQQPlaybackSession;
     return {
       provider: 'qq',
       url: playableUrl,
@@ -4364,8 +4337,6 @@ async function handleQQSongUrl(mid, mediaMid, qualityPreference, playbackHints) 
       userId: hasQQPlaybackSession ? uin : '',
       playbackKeyReady: !!(uin && playbackKey),
       vipRequired: memberTrackHint,
-      vipEvidence: playbackVipEvidence,
-      vipSource: playbackVipEvidence ? 'member-track-playback' : '',
       level: fileMeta.level || info.filename || '',
       quality: fileMeta.label || info.filename || '',
       filename: info.filename || '',

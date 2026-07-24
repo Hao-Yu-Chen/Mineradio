@@ -2713,21 +2713,54 @@ function kugouCookieHasPlayback(cookieText) {
   return extractKugouAuth(cookieText).playbackReady;
 }
 
-function buildCookieHeaderFor(cookies, isAllowedDomain, priority) {
+function cookieIsExpired(cookie, nowSeconds) {
+  const expires = Number(cookie && cookie.expirationDate);
+  return Number.isFinite(expires) && expires > 0 && expires <= nowSeconds;
+}
+
+function qqLoginCookieCandidateScore(cookie) {
+  const domain = String(cookie && cookie.domain || '').replace(/^\./, '').toLowerCase();
+  const pathName = String(cookie && cookie.path || '/');
+  let score = 0;
+  if (domain === 'y.qq.com' || domain.endsWith('.y.qq.com')) score += 400;
+  else if (domain === 'qqmusic.qq.com' || domain.endsWith('.qqmusic.qq.com')) score += 360;
+  else if (domain === 'qq.com') score += 240;
+  else if (domain.endsWith('.qq.com')) score += 160;
+  if (pathName === '/') score += 40;
+  if (cookie && cookie.secure) score += 10;
+  if (cookie && cookie.hostOnly) score += 5;
+  const expires = Number(cookie && cookie.expirationDate);
+  if (Number.isFinite(expires) && expires > Date.now() / 1000) score += Math.min(20, Math.floor((expires - Date.now() / 1000) / 86400));
+  return score;
+}
+
+function buildCookieHeaderFor(cookies, isAllowedDomain, priority, candidateScore) {
   const picked = new Map();
+  const nowSeconds = Date.now() / 1000;
   (cookies || []).forEach((cookie) => {
-    if (!cookie || !cookie.name || !isAllowedDomain(cookie.domain)) return;
-    picked.set(cookie.name, cookie.value || '');
+    if (!cookie || !cookie.name || !isAllowedDomain(cookie.domain) || cookieIsExpired(cookie, nowSeconds)) return;
+    const score = typeof candidateScore === 'function' ? Number(candidateScore(cookie)) || 0 : 0;
+    const previous = picked.get(cookie.name);
+    const expirationDate = Number(cookie.expirationDate) || 0;
+    const tieKey = [cookie.domain || '', cookie.path || '', cookie.value || ''].join('\n');
+    if (
+      !previous ||
+      score > previous.score ||
+      (score === previous.score && expirationDate > previous.expirationDate) ||
+      (score === previous.score && expirationDate === previous.expirationDate && tieKey > previous.tieKey)
+    ) {
+      picked.set(cookie.name, { value: cookie.value || '', score, expirationDate, tieKey });
+    }
   });
 
   const ordered = [];
   (priority || []).forEach((name) => {
     if (picked.has(name)) {
-      ordered.push([name, picked.get(name)]);
+      ordered.push([name, picked.get(name).value]);
       picked.delete(name);
     }
   });
-  picked.forEach((value, name) => ordered.push([name, value]));
+  picked.forEach((entry, name) => ordered.push([name, entry.value]));
 
   return ordered
     .filter(([name, value]) => name && value != null && String(value) !== '')
@@ -2736,7 +2769,7 @@ function buildCookieHeaderFor(cookies, isAllowedDomain, priority) {
 }
 
 function buildCookieHeader(cookies) {
-  return buildCookieHeaderFor(cookies, isQQCookieDomain, QQ_LOGIN_COOKIE_PRIORITY);
+  return buildCookieHeaderFor(cookies, isQQCookieDomain, QQ_LOGIN_COOKIE_PRIORITY, qqLoginCookieCandidateScore);
 }
 
 async function readQQLoginCookieHeader(cookieSession) {
@@ -2860,10 +2893,18 @@ async function openNeteaseMusicLoginWindow(owner) {
   });
 }
 
-async function openQQMusicLoginWindow(owner) {
+async function openQQMusicLoginWindow(owner, options) {
+  options = options || {};
   const cookieSession = session.fromPartition(QQ_LOGIN_PARTITION);
+  if (options.forceReauth) {
+    await cookieSession.clearStorageData({
+      storages: ['cookies', 'localstorage', 'indexdb', 'cachestorage'],
+    });
+  }
   const initialCookie = await readQQLoginCookieHeader(cookieSession);
-  if (qqCookieHasPlaybackLogin(initialCookie)) return { ok: true, cookie: initialCookie, reused: true };
+  if (!options.forceReauth && qqCookieHasPlaybackLogin(initialCookie)) {
+    return { ok: true, cookie: initialCookie, reused: true };
+  }
 
   return new Promise((resolve) => {
     let settled = false;
@@ -5229,9 +5270,9 @@ ipcMain.handle('netease-music-clear-login', async () => {
   return clearNeteaseMusicLoginSession();
 });
 
-ipcMain.handle('qq-music-open-login', async (event) => {
+ipcMain.handle('qq-music-open-login', async (event, options) => {
   if (!loginEasterEggGate.isUnlocked()) return loginEasterEggLockedResult();
-  return openQQMusicLoginWindow(getSenderWindow(event));
+  return openQQMusicLoginWindow(getSenderWindow(event), options || {});
 });
 
 ipcMain.handle('qq-music-clear-login', async () => {
