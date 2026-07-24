@@ -126,9 +126,9 @@ async function testTrackV2GetFallbackAndBitratePriority() {
             id: 'track-get-fallback',
             duration_ms: 180000,
             bit_rates: [{
-              playable_url: 'https://media.example/audio.flac?br=999000',
-              size: 22477500,
-              format: 'flac',
+              playable_url: 'https://media.example/audio.m4a?br=128000',
+              size: 2880000,
+              format: 'm4a',
             }],
           },
         },
@@ -138,9 +138,9 @@ async function testTrackV2GetFallbackAndBitratePriority() {
     const result = await qishui.handleQishuiSongUrl({ id: 'track-get-fallback' }, cookie);
     assert.deepStrictEqual(requests, ['POST', 'GET']);
     assert.strictEqual(result.playable, true);
-    assert.strictEqual(result.url, 'https://media.example/audio.flac?br=999000');
-    assert.strictEqual(result.br, 999000);
-    assert.strictEqual(result.level, 'lossless');
+    assert.strictEqual(result.url, 'https://media.example/audio.m4a?br=128000');
+    assert.strictEqual(result.br, 128000);
+    assert.strictEqual(result.level, 'standard');
   });
 
   await withHttpsMock(({ url, options }) => {

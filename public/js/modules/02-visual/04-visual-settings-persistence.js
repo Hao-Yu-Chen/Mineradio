@@ -296,7 +296,10 @@ function readSavedLyricLayout() {
       backCover: raw.backCover === true,
       visualTintMode: raw.visualTintMode === 'custom' ? 'custom' : 'auto',
       visualTintColor: normalizeHexColor(raw.visualTintColor || '#9db8cf'),
-      uiAccentColor: normalizeHexColor(raw.uiAccentColor || '#00f5d4', '#00f5d4'),
+      uiAccentColor: normalizeHexColor(
+        raw.uiAccentColor || fxDefaults.uiAccentColor || '#ffffff',
+        fxDefaults.uiAccentColor || '#ffffff'
+      ),
       homeAccentColor: normalizeHexColor(raw.homeAccentColor || '#00f5d4'),
       homeIconColor: normalizeHexColor(raw.homeIconColor || fxDefaults.homeIconColor || '#f4d28a', '#f4d28a'),
       visualIconColor: normalizeHexColor(raw.visualIconColor || fxDefaults.visualIconColor || '#7fd8ff', '#7fd8ff'),
@@ -779,7 +782,10 @@ function saveLyricLayout(opts) {
       backCover: !!fx.backCover,
       visualTintMode: fx.visualTintMode === 'custom' ? 'custom' : 'auto',
       visualTintColor: normalizeHexColor(fx.visualTintColor || '#9db8cf'),
-      uiAccentColor: normalizeHexColor(fx.uiAccentColor || '#00f5d4', '#00f5d4'),
+      uiAccentColor: normalizeHexColor(
+        fx.uiAccentColor || fxDefaults.uiAccentColor || '#ffffff',
+        fxDefaults.uiAccentColor || '#ffffff'
+      ),
       homeAccentColor: normalizeHexColor(fx.homeAccentColor || '#00f5d4'),
       homeIconColor: normalizeHexColor(fx.homeIconColor || '#f4d28a', '#f4d28a'),
       visualIconColor: normalizeHexColor(fx.visualIconColor || '#7fd8ff', '#7fd8ff'),

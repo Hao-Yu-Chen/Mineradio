@@ -611,8 +611,12 @@ function readBackgroundMediaFile(file) {
   else if (/^video\//i.test(file.type || '')) readBackgroundVideoFile(file);
   else showToast('请选择图片或视频文件');
 }
+function defaultUiAccentColor() {
+  return normalizeHexColor(fxDefaults.uiAccentColor || '#ffffff', '#ffffff');
+}
 function applyUiAccentColor() {
-  var color = normalizeHexColor(fx.uiAccentColor || '#00f5d4', '#00f5d4');
+  var fallback = defaultUiAccentColor();
+  var color = normalizeHexColor(fx.uiAccentColor || fallback, fallback);
   var rgb = hexToRgb(color);
   var root = document.documentElement;
   root.style.setProperty('--fc-accent', color);
@@ -623,21 +627,23 @@ function applyUiAccentColor() {
 }
 function updateUiAccentControls() {
   applyUiAccentColor();
-  var color = normalizeHexColor(fx.uiAccentColor || '#00f5d4', '#00f5d4');
+  var fallback = defaultUiAccentColor();
+  var color = normalizeHexColor(fx.uiAccentColor || fallback, fallback);
   var picker = document.getElementById('ui-accent-picker');
   var value = document.getElementById('ui-accent-value');
   if (picker) picker.value = color;
   if (value) value.textContent = color.toUpperCase();
 }
 function setUiAccentColor(color, silent) {
-  fx.uiAccentColor = normalizeHexColor(color || '#00f5d4', '#00f5d4');
+  var fallback = defaultUiAccentColor();
+  fx.uiAccentColor = normalizeHexColor(color || fallback, fallback);
   updateUiAccentControls();
   if (shelfManager && shelfManager.refreshTheme) shelfManager.refreshTheme();
   saveLyricLayout({ user: true, reason: 'uiAccentColor' });
   if (!silent) showToast('界面高亮: ' + fx.uiAccentColor.toUpperCase());
 }
 function resetUiAccentColor() {
-  setUiAccentColor(fxDefaults.uiAccentColor || '#00f5d4');
+  setUiAccentColor(defaultUiAccentColor());
 }
 function updateVisualTintControls() {
   var picker = document.getElementById('visual-tint-picker');

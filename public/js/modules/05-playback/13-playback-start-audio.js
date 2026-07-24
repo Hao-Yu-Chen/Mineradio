@@ -568,7 +568,7 @@ async function resolveAlbumGaplessPlaybackData(song) {
       qualityParam, { timeoutMs: 9000 });
   }
   if (playbackProvider === 'qishui') {
-    return apiJson('/api/qishui/song/url?id=' + encodeURIComponent(song.id || song.providerSongId || '') + qualityParam, { timeoutMs: 9000 });
+    return apiJson('/api/qishui/song/url?id=' + encodeURIComponent(song.id || song.providerSongId || '') + qqPlaybackEvidenceQuery(song) + qualityParam, { timeoutMs: 9000 });
   }
   if (playbackProvider === 'spotify') {
     return apiJson('/api/spotify/song/url?id=' + encodeURIComponent(song.id || song.providerSongId || song.spotifyId || '') +
@@ -1092,7 +1092,7 @@ async function playQueueAt(idx, opts) {
           '&fee=' + encodeURIComponent(song.fee || song.Fee || '') +
           qualityParam, { timeoutMs: 9000 });
       } else if (isQishuiPlayback) {
-        data = await apiJson('/api/qishui/song/url?id=' + encodeURIComponent(song.id || song.providerSongId || '') + qualityParam, { timeoutMs: 9000 });
+        data = await apiJson('/api/qishui/song/url?id=' + encodeURIComponent(song.id || song.providerSongId || '') + qqPlaybackEvidenceQuery(song) + qualityParam, { timeoutMs: 9000 });
       } else if (isSpotifyPlayback) {
         data = await apiJson('/api/spotify/song/url?id=' + encodeURIComponent(song.id || song.providerSongId || song.spotifyId || '') +
           '&spotifyId=' + encodeURIComponent(song.spotifyId || '') +

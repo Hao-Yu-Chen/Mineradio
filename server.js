@@ -156,7 +156,7 @@ const CUEFIELD_FEEDBACK_FILE = process.env.CUEFIELD_FEEDBACK_FILE || path.join(_
 const LISTEN_SYNC_JOURNAL_FILE = process.env.MINERADIO_LISTEN_SYNC_FILE || path.join(__dirname, 'data', 'listen-sync-journal.json');
 const LISTEN_SYNC_JOURNAL_LIMIT = 600;
 const APP_PACKAGE = readPackageInfo();
-const APP_VERSION = process.env.MINERADIO_VERSION || APP_PACKAGE.version || '2.0.0';
+const APP_VERSION = process.env.MINERADIO_VERSION || APP_PACKAGE.version || '2.0.1';
 const UPDATE_CONFIG = readUpdateConfig(APP_PACKAGE);
 const PATCH_MAX_BYTES = 12 * 1024 * 1024;
 const PATCH_ALLOWED_ROOTS = new Set(['public', 'desktop', 'build']);
@@ -6148,6 +6148,11 @@ const server = http.createServer(async (req, res) => {
       sendJSON(res, await handleQishuiSongUrl({
         id: url.searchParams.get('id') || url.searchParams.get('trackId') || '',
         quality: url.searchParams.get('quality') || '',
+        vipRequired: url.searchParams.get('vipRequired') || '',
+        needVip: url.searchParams.get('needVip') || url.searchParams.get('need_vip') || '',
+        onlyVipPlayable: url.searchParams.get('onlyVipPlayable') || url.searchParams.get('only_vip_playable') || '',
+        privilege: url.searchParams.get('privilege') || url.searchParams.get('mediaPrivilege') || url.searchParams.get('media_privilege') || '',
+        fee: url.searchParams.get('fee') || '',
       }, qishuiCookie));
     } catch (err) {
       console.error('[QishuiSongUrl]', err);
@@ -6178,6 +6183,11 @@ const server = http.createServer(async (req, res) => {
         sqHash: url.searchParams.get('sqHash') || url.searchParams.get('sq_hash') || '',
         resHash: url.searchParams.get('resHash') || url.searchParams.get('res_hash') || '',
         quality: url.searchParams.get('quality') || '',
+        vipRequired: url.searchParams.get('vipRequired') || '',
+        needVip: url.searchParams.get('needVip') || url.searchParams.get('need_vip') || '',
+        onlyVipPlayable: url.searchParams.get('onlyVipPlayable') || url.searchParams.get('only_vip_playable') || '',
+        privilege: url.searchParams.get('privilege') || url.searchParams.get('mediaPrivilege') || url.searchParams.get('media_privilege') || '',
+        fee: url.searchParams.get('fee') || '',
       }, kugouCookie);
       sendJSON(res, info);
     } catch (err) {

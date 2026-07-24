@@ -284,11 +284,24 @@ function normalizeKugouLoginStatus(info) {
 }
 function applyKugouPlaybackStatusEvidence(info) {
   if (!info || info.provider !== 'kugou' || !info.loggedIn) return false;
-  kugouLoginStatus = normalizeKugouLoginStatus(Object.assign({}, kugouLoginStatus || {}, info, {
+  var existing = kugouLoginStatus || {};
+  var verifiedMembership = info.membershipVerified === true &&
+    (info.membershipSource === 'kugou-vip-api' || info.membershipSource === 'kugou-cookie-explicit');
+  var safeUpdate = {
     provider: 'kugou',
     loggedIn: true,
-    playbackKeyReady: !!(info.playbackReady || info.playbackKeyReady || (kugouLoginStatus && kugouLoginStatus.playbackKeyReady))
-  }));
+    playbackKeyReady: !!(info.playbackReady || info.playbackKeyReady || existing.playbackKeyReady)
+  };
+  if (verifiedMembership) {
+    safeUpdate.vipType = Number(info.vipType || 0) || 0;
+    safeUpdate.svipType = Number(info.svipType || 0) || 0;
+    safeUpdate.vipLevel = info.vipLevel === 'svip' ? 'svip' : (info.vipLevel === 'vip' ? 'vip' : 'none');
+    safeUpdate.isVip = info.isVip === true;
+    safeUpdate.isSvip = info.isSvip === true;
+    safeUpdate.membershipVerified = true;
+    safeUpdate.membershipSource = info.membershipSource;
+  }
+  kugouLoginStatus = normalizeKugouLoginStatus(Object.assign({}, existing, safeUpdate));
   kugouLoginWasLoggedIn = true;
   renderUserBtn();
   return true;
@@ -394,7 +407,7 @@ function normalizeQishuiLoginStatus(info) {
     vipLevel: info && (info.vipLevel || info.vip_level) || 'none',
     isVip: !!(info && info.isVip),
     isSvip: !!(info && info.isSvip),
-    playbackKeyReady: configured,
+    playbackKeyReady: !!(webSession && capabilities.playableUrl),
     playbackMode: info && info.playbackMode || 'recommend-match',
     searchReady: searchReady,
     webSession: webSession,

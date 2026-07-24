@@ -26,7 +26,6 @@ function makeShelfManager() {
   var openCardIdx = -1;       // 已打开内容框的卡片 (-1 表示无)
   var contentList = null;     // 二级 PSP 滚动列表 manager
   var connectorParticles = null;
-  var floorMirror = null;
   var playlistPaneCache = { revision: -1, source: null, mine: [], fav: [] };
 
   // 一次性返回完整 items 数组 (不只 5 张, 全部参与 PSP 滚动)
@@ -385,12 +384,6 @@ function makeShelfManager() {
       if (connectorParticles.material) connectorParticles.material.dispose();
       connectorParticles = null;
     }
-    if (floorMirror) {
-      if (floorMirror.parent) floorMirror.parent.remove(floorMirror);
-      if (floorMirror.geometry) floorMirror.geometry.dispose();
-      if (floorMirror.material) floorMirror.material.dispose();
-      floorMirror = null;
-    }
     allItems = currentItems();
     lastSig = sig(allItems);
     lastCardRedrawAt = -10;
@@ -605,20 +598,6 @@ void main(){ vec4 t = texture2D(uDotTex, gl_PointCoord); if (t.a < 0.02) discard
     connectorParticles.renderOrder = 49;
     connectorParticles.position.set(0, -2.2, 0);
     if (group.parent) group.parent.add(connectorParticles); else scene.add(connectorParticles);
-    // 底部地面反射
-    var mGeo = new THREE.PlaneGeometry(10, 1.8);
-    var mCanvas = document.createElement('canvas'); mCanvas.width = 256; mCanvas.height = 64;
-    var mctx = mCanvas.getContext('2d');
-    var mg = mctx.createLinearGradient(0, 0, 0, 64);
-    mg.addColorStop(0, 'rgba(255,255,255,0.07)'); mg.addColorStop(1, 'rgba(255,255,255,0)');
-    mctx.fillStyle = mg; mctx.fillRect(0, 0, 256, 64);
-    var mTex = new THREE.CanvasTexture(mCanvas);
-    mTex.generateMipmaps = false;
-    var mMat = new THREE.MeshBasicMaterial({ map: mTex, transparent: true, depthWrite: false, opacity: 0.55 });
-    floorMirror = new THREE.Mesh(mGeo, mMat);
-    floorMirror.position.set(0, -2.85, 0.4);
-    floorMirror.rotation.x = -Math.PI / 2;
-    if (group.parent) group.parent.add(floorMirror); else scene.add(floorMirror);
   }
 
   function sig(items) {
@@ -746,7 +725,6 @@ void main(){ vec4 t = texture2D(uDotTex, gl_PointCoord); if (t.a < 0.02) discard
       if (m === 'off') {
         if (group) { scene.remove(group); cards.forEach(function (c) { c.texture.dispose(); c.mesh.material.dispose(); c.mesh.geometry.dispose(); }); }
         if (connectorParticles) { scene.remove(connectorParticles); connectorParticles.geometry.dispose(); connectorParticles.material.dispose(); connectorParticles = null; }
-        if (floorMirror) { scene.remove(floorMirror); floorMirror.geometry.dispose(); floorMirror.material.dispose(); floorMirror = null; }
         group = null; cards = [];
         if (contentList) contentList.close();
         return;
@@ -789,11 +767,11 @@ void main(){ vec4 t = texture2D(uDotTex, gl_PointCoord); if (t.a < 0.02) discard
       if (shelfVisibility < 0.01 && targetVis === 0) shelfVisibility = 0;
       group.visible = appRevealed && (mode !== 'side' || shelfVisibility > 0) && (allItems.length > 0 || (contentList && contentList.isOpen()));
       if (connectorParticles) connectorParticles.visible = group.visible && mode === 'stage';
-      if (floorMirror) floorMirror.visible = group.visible && mode === 'stage';
       if (mode === 'side') {
-        var passiveAlwaysGroup = shelfAlwaysVisible() && !shelfPinnedOpen && !(contentList && contentList.isOpen());
+        var contentOpenForLayer = !!(contentList && contentList.isOpen());
+        var passiveAlwaysGroup = shelfAlwaysVisible() && !shelfPinnedOpen && !contentOpenForLayer;
         var liftedCardActive = passiveAlwaysGroup && cards.some(function (c) { return c.selected || (c.floatMix || 0) > 0.025; });
-        group.renderOrder = passiveAlwaysGroup && !liftedCardActive ? 30 : 50;
+        group.renderOrder = (contentOpenForLayer || shelfPinnedOpen || liftedCardActive) ? 300 : 30;
         group.position.set(0, 0, 0);
         var bindToCover = (shelfAlwaysVisible() || shelfPinnedOpen || shelfVisibility > 0.06) && particles && particles.rotation && !(contentList && contentList.isOpen());
         if (bindToCover) {
@@ -807,7 +785,7 @@ void main(){ vec4 t = texture2D(uDotTex, gl_PointCoord); if (t.a < 0.02) discard
           group.rotation.z += (0 - group.rotation.z) * 0.045;
         }
       } else {
-        group.renderOrder = 50;
+        group.renderOrder = ((contentList && contentList.isOpen()) || selectedIdx >= 0) ? 300 : 30;
         var t = uniforms.uTime.value;
         group.position.y = Math.sin(t * 0.3) * 0.04;
         group.position.x = px * 0.10;

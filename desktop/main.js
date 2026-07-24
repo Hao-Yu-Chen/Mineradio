@@ -17,6 +17,11 @@ const {
   LOGIN_EASTER_EGG_GATE_VERSION,
   LOGIN_EASTER_EGG_STATE_FILE,
 } = require('./login-easter-egg-gate');
+const {
+  discoverQishuiClientDataRoots,
+  discoverQishuiCookieStores,
+  qishuiDiscoveryErrorCode,
+} = require('./qishui-local-session-discovery');
 const { extractKugouAuth } = require('../kugou-api');
 const {
   getQishuiOAuthConfig,
@@ -2373,19 +2378,20 @@ function readSavedQishuiCookieHeader() {
 }
 
 function qishuiOfficialClientDataDirCandidates() {
-  const candidates = [];
-  const add = (value) => {
-    value = String(value || '').trim();
-    if (!value) return;
-    const resolved = path.resolve(value.replace(/^~(?=\\|\/|$)/, app.getPath('home')));
-    if (!candidates.includes(resolved)) candidates.push(resolved);
-  };
-  QISHUI_OFFICIAL_CLIENT_DATA_DIRS.forEach(add);
-  try { add(path.join(app.getPath('appData'), 'SodaMusic')); } catch (e) {}
-  try { add(path.join(app.getPath('appData'), 'sodaMusic')); } catch (e) {}
-  try { add(path.join(app.getPath('appData'), 'QishuiMusic')); } catch (e) {}
-  try { add(path.join(app.getPath('appData'), 'LunaMusic')); } catch (e) {}
-  return candidates;
+  let appDataPath = process.env.APPDATA || '';
+  let homePath = process.env.USERPROFILE || process.env.HOME || '';
+  try { appDataPath = app.getPath('appData') || appDataPath; } catch (_) {}
+  try { homePath = app.getPath('home') || homePath; } catch (_) {}
+  let localAppDataPath = process.env.LOCALAPPDATA || '';
+  if (!localAppDataPath && appDataPath) {
+    localAppDataPath = path.resolve(appDataPath, '..', 'Local');
+  }
+  return discoverQishuiClientDataRoots({
+    explicitDirs: QISHUI_OFFICIAL_CLIENT_DATA_DIRS,
+    appDataPath,
+    localAppDataPath,
+    homePath,
+  });
 }
 
 function readSqliteVarint(buffer, offset, end) {
@@ -2523,8 +2529,15 @@ function extractQishuiSessionIdFromCookieDatabase(databasePath) {
   return match ? String(match[1] || '').trim() : '';
 }
 
-function readQishuiOfficialClientCookieDatabase(dir) {
-  const cookieDb = path.join(dir, 'Network', 'Cookies');
+function readQishuiOfficialClientCookieDatabase(target) {
+  const store = target && typeof target === 'object' && target.cookieDbPath
+    ? target
+    : {
+        cookieDbPath: path.basename(String(target || '')).toLowerCase() === 'cookies'
+          ? path.resolve(String(target || ''))
+          : path.join(String(target || ''), 'Network', 'Cookies'),
+      };
+  const cookieDb = store.cookieDbPath;
   if (!fs.existsSync(cookieDb)) return { cookie: '', source: '', missing: true, dbPath: cookieDb };
   try {
     const cookie = extractQishuiCookieHeaderFromCookieDatabase(cookieDb);
@@ -2532,33 +2545,164 @@ function readQishuiOfficialClientCookieDatabase(dir) {
     return { cookie, source: cookieDb, dbPath: cookieDb };
   } catch (e) {
     const message = e && e.message || String(e || '');
-    const locked = /used by another process|EBUSY|locked|busy|access.*denied|无法访问|另一个程序正在使用|进程无法访问/i.test(message);
-    return { cookie: '', source: '', locked, error: message, dbPath: cookieDb };
+    const errorCode = qishuiDiscoveryErrorCode(e);
+    const locked = errorCode === 'locked' || errorCode === 'access-denied' ||
+      /used by another process|EBUSY|locked|busy|access.*denied|无法访问|另一个程序正在使用|进程无法访问/i.test(message);
+    return { cookie: '', source: '', locked, error: message, errorCode, dbPath: cookieDb };
   }
 }
 
 async function readQishuiOfficialClientCookieHeader() {
   let last = null;
   let lastLocked = null;
-  for (const dir of qishuiOfficialClientDataDirCandidates()) {
-    const direct = readQishuiOfficialClientCookieDatabase(dir);
-    if (direct && direct.cookie) return Object.assign({ method: 'cookie-db' }, direct);
+  const roots = qishuiOfficialClientDataDirCandidates();
+  const stores = [];
+  const storeKeys = new Set();
+  const attemptsByStore = new Map();
+  const diagnostics = {
+    version: 1,
+    mode: 'sodamusic-local-session',
+    candidateCount: roots.length,
+    rootsChecked: [],
+    attempts: [],
+    selected: null,
+    result: 'pending',
+  };
+
+  for (const root of roots) {
+    const scan = discoverQishuiCookieStores(root);
+    diagnostics.rootsChecked.push({
+      kind: String(root.kind || 'detected'),
+      hint: String(root.hint || 'Detected/client-data'),
+      exists: scan.rootExists === true,
+      storesFound: scan.stores.length,
+      scannedDirectories: scan.scannedDirectories,
+      truncated: scan.truncated === true,
+      errorCode: String(scan.errorCode || ''),
+    });
+    for (const store of scan.stores) {
+      const key = path.resolve(store.cookieDbPath).toLowerCase();
+      if (storeKeys.has(key)) continue;
+      storeKeys.add(key);
+      stores.push(store);
+      const attempt = {
+        rootKind: String(store.rootKind || root.kind || 'detected'),
+        rootHint: String(store.rootHint || root.hint || 'Detected/client-data'),
+        storeLayout: String(store.layout || 'nested-cookie-store'),
+        relativeStore: String(store.relativePath || 'Network/Cookies'),
+        directRead: 'pending',
+        electronRead: 'not-run',
+        errorCode: '',
+      };
+      diagnostics.attempts.push(attempt);
+      attemptsByStore.set(key, attempt);
+    }
+  }
+
+  const finish = (result, diagnosticResult, selected) => {
+    diagnostics.result = String(diagnosticResult || 'not-found');
+    diagnostics.selected = selected || null;
+    try {
+      console.log('[QishuiLocalSession]', JSON.stringify(diagnostics));
+    } catch (_) {}
+    return Object.assign({}, result || {}, { diagnostics });
+  };
+
+  for (const store of stores) {
+    const key = path.resolve(store.cookieDbPath).toLowerCase();
+    const attempt = attemptsByStore.get(key);
+    const direct = readQishuiOfficialClientCookieDatabase(store);
+    if (attempt) {
+      attempt.directRead = direct && direct.cookie
+        ? 'login'
+        : direct && direct.locked
+          ? 'locked'
+          : direct && direct.missing
+            ? 'missing'
+            : direct && direct.noSession
+              ? 'no-login'
+              : 'error';
+      attempt.errorCode = String(direct && direct.errorCode || '');
+    }
+    if (direct && direct.cookie) {
+      return finish(
+        Object.assign({ method: 'cookie-db' }, direct),
+        'login',
+        {
+          method: 'cookie-db',
+          rootKind: attempt && attempt.rootKind || 'detected',
+          rootHint: attempt && attempt.rootHint || 'Detected/client-data',
+          storeLayout: attempt && attempt.storeLayout || 'nested-cookie-store',
+          relativeStore: attempt && attempt.relativeStore || 'Network/Cookies',
+        }
+      );
+    }
     if (direct && direct.locked) lastLocked = direct;
     last = direct || last;
   }
-  if (!session || typeof session.fromPath !== 'function') return Object.assign({ cookie: '', source: '', skipped: 'session.fromPath unavailable' }, lastLocked || last || {});
-  for (const dir of qishuiOfficialClientDataDirCandidates()) {
+  if (!stores.length) last = { cookie: '', source: '', missing: true, dbPath: '' };
+  if (!session || typeof session.fromPath !== 'function') {
+    return finish(
+      Object.assign({ cookie: '', source: '', skipped: 'session.fromPath unavailable' }, lastLocked || last || {}),
+      lastLocked ? 'locked' : 'not-found'
+    );
+  }
+
+  const sessionPaths = new Set();
+  for (const store of stores) {
+    const key = path.resolve(store.cookieDbPath).toLowerCase();
+    const attempt = attemptsByStore.get(key);
+    const sessionPathKey = path.resolve(store.sessionPath).toLowerCase();
+    if (sessionPaths.has(sessionPathKey)) {
+      if (attempt) attempt.electronRead = 'duplicate-session';
+      continue;
+    }
+    sessionPaths.add(sessionPathKey);
     try {
-      const cookieDb = path.join(dir, 'Network', 'Cookies');
-      if (!fs.existsSync(cookieDb)) continue;
-      const clientSession = session.fromPath(dir, { cache: false });
+      const clientSession = session.fromPath(store.sessionPath, { cache: false });
       const cookie = await readQishuiLoginCookieHeader(clientSession);
-      if (qishuiCookieHasLogin(cookie)) return { cookie, source: dir, method: 'electron-session' };
+      if (attempt) attempt.electronRead = qishuiCookieHasLogin(cookie) ? 'login' : 'no-login';
+      if (qishuiCookieHasLogin(cookie)) {
+        return finish(
+          { cookie, source: store.cookieDbPath, method: 'electron-session' },
+          'login',
+          {
+            method: 'electron-session',
+            rootKind: attempt && attempt.rootKind || 'detected',
+            rootHint: attempt && attempt.rootHint || 'Detected/client-data',
+            storeLayout: attempt && attempt.storeLayout || 'nested-cookie-store',
+            relativeStore: attempt && attempt.relativeStore || 'Network/Cookies',
+          }
+        );
+      }
     } catch (e) {
-      console.warn('Qishui official client cookie import skipped:', dir, e && e.message || e);
+      const errorCode = qishuiDiscoveryErrorCode(e);
+      const locked = errorCode === 'locked' || errorCode === 'access-denied';
+      if (attempt) {
+        attempt.electronRead = locked ? 'locked' : 'error';
+        attempt.errorCode = errorCode;
+      }
+      if (locked) {
+        lastLocked = {
+          cookie: '',
+          source: '',
+          locked: true,
+          error: e && e.message || String(e || ''),
+          errorCode,
+          dbPath: store.cookieDbPath,
+        };
+      }
+      console.warn('[QishuiLocalSession] electron import skipped', JSON.stringify({
+        rootHint: attempt && attempt.rootHint || 'Detected/client-data',
+        storeLayout: attempt && attempt.storeLayout || 'nested-cookie-store',
+        errorCode,
+      }));
     }
   }
-  return Object.assign({ cookie: '', source: '', skipped: 'no logged-in SodaMusic client session' }, lastLocked || last || {});
+  return finish(
+    Object.assign({ cookie: '', source: '', skipped: 'no logged-in SodaMusic client session' }, lastLocked || last || {}),
+    lastLocked ? 'locked' : 'not-found'
+  );
 }
 
 function kugouCookieHasLogin(cookieText) {
@@ -3439,6 +3583,7 @@ async function openQishuiMusicLoginWindow(owner) {
       importedOfficialClient: true,
       source: imported.source,
       importMethod: imported.method || 'cookie-db',
+      localSessionDiagnostics: imported.diagnostics || null,
       message: '已读取本机汽水 PC 登录态，正在导入 Mineradio 并同步我的喜欢和歌单',
     };
   }
@@ -3473,6 +3618,7 @@ async function openQishuiMusicLoginWindow(owner) {
       persistedSession: true,
       source: saved.source,
       importMethod: saved.method,
+      localSessionDiagnostics: imported && imported.diagnostics || null,
       message: imported && imported.locked
         ? '本机汽水登录数据库暂时被占用，已继续使用 Mineradio 上次导入的有效登录态。'
         : '已继续使用 Mineradio 上次从本机汽水 PC 导入的登录态。',
@@ -3488,6 +3634,7 @@ async function openQishuiMusicLoginWindow(owner) {
     localPcImport: true,
     source: imported && (imported.dbPath || imported.source) || '',
     locked,
+    localSessionDiagnostics: imported && imported.diagnostics || null,
     error: locked ? 'QISHUI_LOCAL_COOKIE_DB_LOCKED' : 'QISHUI_LOCAL_COOKIE_NOT_FOUND',
     message: locked
       ? '汽水 PC 客户端正在占用本地登录数据库。请先完全退出汽水音乐 PC 端，再点击“重新导入”。'
@@ -5271,7 +5418,6 @@ function configureLocalServerEnvironment(port) {
   process.env.COOKIE_FILE = path.join(STABLE_USER_DATA_PATH, '.cookie');
   process.env.QQ_COOKIE_FILE = path.join(STABLE_USER_DATA_PATH, '.qq-cookie');
   process.env.KUGOU_COOKIE_FILE = path.join(STABLE_USER_DATA_PATH, '.kugou-cookie');
-  process.env.KUGOU_VIP_EVIDENCE_FILE = path.join(STABLE_USER_DATA_PATH, '.kugou-vip-evidence.json');
   process.env.QISHUI_COOKIE_FILE = path.join(STABLE_USER_DATA_PATH, '.qishui-cookie');
   process.env.QISHUI_TOKEN_FILE = path.join(STABLE_USER_DATA_PATH, '.qishui-token');
   process.env.MINERADIO_LISTEN_SYNC_FILE = path.join(STABLE_USER_DATA_PATH, 'listen-sync-journal.json');
@@ -5291,7 +5437,6 @@ const APP_OWNED_MIGRATION_FILES = [
   '.cookie',
   '.qq-cookie',
   '.kugou-cookie',
-  '.kugou-vip-evidence.json',
   '.qishui-cookie',
   '.qishui-token',
   '.qishui-oauth.json',
@@ -5360,7 +5505,29 @@ function migrateMisplacedAppOwnedFiles() {
   });
 }
 
+function removeDeprecatedKugouVipEvidenceFiles() {
+  const fileName = '.kugou-vip-evidence.json';
+  const candidates = [
+    { label: 'stable-user-data', file: path.join(STABLE_USER_DATA_PATH, fileName) },
+    { label: 'legacy-resource-dir', file: path.join(__dirname, '..', fileName) },
+  ];
+  const removed = [];
+  for (const candidate of candidates) {
+    try {
+      if (!fs.existsSync(candidate.file)) continue;
+      fs.unlinkSync(candidate.file);
+      removed.push(candidate.label);
+    } catch (error) {
+      console.warn('[UserDataMigration] deprecated Kugou VIP evidence cleanup skipped', candidate.label, error.message);
+    }
+  }
+  if (removed.length) {
+    console.log('[UserDataMigration] removed deprecated Kugou VIP evidence', removed.join(','));
+  }
+}
+
 function migrateLegacyAuthStorage() {
+  removeDeprecatedKugouVipEvidenceFiles();
   migrateMisplacedAppOwnedFiles();
   try {
     const legacyNeteaseCookie = path.join(__dirname, '..', '.cookie');
@@ -5394,17 +5561,6 @@ function migrateLegacyAuthStorage() {
     }
   } catch (e) {
     console.warn('Kugou cookie migration skipped:', e.message);
-  }
-  try {
-    const legacyKugouVipEvidence = path.join(__dirname, '..', '.kugou-vip-evidence.json');
-    if (fs.existsSync(legacyKugouVipEvidence)) {
-      if (!fs.existsSync(process.env.KUGOU_VIP_EVIDENCE_FILE)) {
-        fs.copyFileSync(legacyKugouVipEvidence, process.env.KUGOU_VIP_EVIDENCE_FILE);
-      }
-      fs.unlinkSync(legacyKugouVipEvidence);
-    }
-  } catch (e) {
-    console.warn('Kugou VIP evidence migration skipped:', e.message);
   }
   try {
     const legacyQishuiCookie = path.join(__dirname, '..', '.qishui-cookie');

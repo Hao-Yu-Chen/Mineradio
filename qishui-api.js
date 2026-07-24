@@ -11,7 +11,7 @@ const QISHUI_RELATED_MEDIA_PATH = '/api/luna/v1/platform/feed/related-media/';
 const QISHUI_FEED_SONG_TAB_PATH = '/api/luna/v1/platform/feed/song-tab/';
 const QISHUI_SCOPE = 'luna.openapi.platform.play_core';
 const DEFAULT_QISHUI_TOKEN_FILE = path.join(__dirname, '.qishui-token');
-const QISHUI_UA = 'Mineradio/2.0.0 (Qishui official OpenAPI bridge)';
+const QISHUI_UA = 'Mineradio/2.0.1 (Qishui official OpenAPI bridge)';
 const QISHUI_OAUTH_AUTH_URL = (process.env.QISHUI_OAUTH_AUTH_URL || 'https://open.douyin.com/platform/oauth/connect').replace(/\/+$/, '');
 const QISHUI_OAUTH_TOKEN_URL = process.env.QISHUI_OAUTH_TOKEN_URL || 'https://open.douyin.com/oauth/access_token/';
 const QISHUI_PUBLIC_ENABLED = process.env.QISHUI_PUBLIC_ENABLED !== '0';
@@ -27,7 +27,7 @@ const QISHUI_WEB_API_BASES = (process.env.QISHUI_WEB_API_BASES || 'https://api5-
 const QISHUI_WEB_PC_API_BASE = (process.env.QISHUI_WEB_PC_API_BASE || 'https://api.qishui.com').replace(/\/+$/, '');
 const QISHUI_PUBLIC_HEADERS = {
   'Accept': 'application/json,text/plain,*/*',
-  'User-Agent': 'Mineradio/2.0.0 (Qishui public catalog bridge)',
+  'User-Agent': 'Mineradio/2.0.1 (Qishui public catalog bridge)',
 };
 const QISHUI_WEB_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) SodaMusic/3.1.0 Chrome/136.0.7103.59 Electron/36.4.0-rs.22.release.main.1 TTElectron/36.4.0-rs.22.release.main.1 Safari/537.36';
 const QISHUI_PC_APP_UA = 'LunaPC/3.3.0(359450208)';
@@ -188,7 +188,8 @@ function createTtlCache(maxEntries, defaultTtlMs) {
       if (cached !== null) return cached;
       if (inflight.has(key)) return inflight.get(key);
       const promise = Promise.resolve().then(fn).then((value) => {
-        this.set(key, value, ttlMs);
+        const resolvedTtlMs = typeof ttlMs === 'function' ? ttlMs(value) : ttlMs;
+        this.set(key, value, resolvedTtlMs);
         return value;
       }).finally(() => inflight.delete(key));
       inflight.set(key, promise);
@@ -204,6 +205,8 @@ const qishuiFeedCache = createTtlCache(16, 90 * 1000);
 const qishuiWebLibraryCache = createTtlCache(24, 90 * 1000);
 const qishuiWebPlaylistCache = createTtlCache(48, 90 * 1000);
 const qishuiWebPlaylistCursorCache = new Map();
+const qishuiMembershipCache = createTtlCache(24, 60 * 1000);
+const qishuiTrackMetadataCache = createTtlCache(120, 20 * 1000);
 const qishuiPlaybackCache = createTtlCache(120, 4 * 60 * 1000);
 
 function requestText(targetUrl, opts, body) {
@@ -733,6 +736,8 @@ function clearQishuiRuntimeCaches() {
   qishuiWebLibraryCache.clear && qishuiWebLibraryCache.clear();
   qishuiWebPlaylistCache.clear && qishuiWebPlaylistCache.clear();
   qishuiWebPlaylistCursorCache.clear();
+  qishuiMembershipCache.clear && qishuiMembershipCache.clear();
+  qishuiTrackMetadataCache.clear && qishuiTrackMetadataCache.clear();
   qishuiPlaybackCache.clear && qishuiPlaybackCache.clear();
 }
 
@@ -883,6 +888,7 @@ function getQishuiStatus(cookieText) {
     isVip: false,
     isSvip: false,
     vipLabel: '无VIP',
+    membershipKnown: false,
     tokenFile: tokenInfo.file,
     tokenSource: tokenInfo.source,
     oauthConfigured: oauthConfig.configured,
@@ -1093,32 +1099,253 @@ function qishuiProfileFromUser(user) {
   };
 }
 
+const QISHUI_VIP_NUMBER_KEYS = new Set([
+  'viptype', 'viplevel', 'membertype', 'memberlevel', 'musicviptype', 'musicviplevel',
+]);
+const QISHUI_SVIP_NUMBER_KEYS = new Set([
+  'sviptype', 'sviplevel', 'superviptype', 'superviplevel',
+]);
+const QISHUI_VIP_FLAG_KEYS = new Set([
+  'isvip', 'ismember', 'hasvip', 'hasmembership', 'vipactive', 'vipenabled',
+]);
+const QISHUI_SVIP_FLAG_KEYS = new Set([
+  'issvip', 'issupervip', 'hassvip', 'hassupervip', 'svipactive', 'svipenabled',
+]);
+const QISHUI_MEMBERSHIP_LABEL_KEYS = new Set([
+  'viplevelname', 'vipname', 'memberlevelname', 'membername', 'membershiplevel', 'membershiptype',
+]);
+const QISHUI_VIP_CONTAINER_KEYS = new Set([
+  'vipinfo', 'vipdetail', 'vipbenefit', 'vippackage', 'memberinfo', 'memberdetail',
+  'memberbenefit', 'memberpackage', 'membershipinfo', 'membershipdetail',
+]);
+const QISHUI_SVIP_CONTAINER_KEYS = new Set([
+  'svipinfo', 'svipdetail', 'svipbenefit', 'svippackage', 'supervipinfo',
+  'supervipdetail', 'supervipbenefit', 'supervippackage',
+]);
+const QISHUI_MEMBERSHIP_STATUS_KEYS = new Set([
+  'status', 'state', 'active', 'valid', 'enabled', 'isactive', 'isvalid', 'isenabled',
+]);
+const QISHUI_MEMBERSHIP_EXPIRY_KEYS = new Set([
+  'expiretime', 'expiresat', 'expirationtime', 'expiredat', 'endtime', 'validuntil',
+  'vipexpiretime', 'vipexpiresat', 'vipexpiredat', 'vipendtime',
+  'memberexpiretime', 'memberexpiresat', 'memberexpiredat', 'memberendtime',
+  'svipexpiretime', 'svipexpiresat', 'svipexpiredat', 'svipendtime',
+]);
+
+function qishuiNormalizedFieldKey(value) {
+  return String(value || '').toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]+/g, '');
+}
+
+function qishuiExplicitPositive(value) {
+  if (value === true) return true;
+  if (typeof value === 'number') return Number.isFinite(value) && value > 0;
+  const text = normalizeText(value).toLowerCase();
+  if (!text) return false;
+  if (/^\d+(?:\.\d+)?$/.test(text)) return Number(text) > 0;
+  return /^(true|yes|active|valid|enabled|opened|vip|svip|premium|member|会员|已开通|有效)$/.test(text);
+}
+
+function qishuiExplicitNegative(value) {
+  if (value === false || value === null) return true;
+  if (typeof value === 'number') return Number.isFinite(value) && value <= 0;
+  const text = normalizeText(value).toLowerCase();
+  if (!text) return false;
+  if (/^\d+(?:\.\d+)?$/.test(text)) return Number(text) <= 0;
+  return /^(false|no|inactive|invalid|disabled|closed|expired|none|free|normal|ordinary|非会员|普通用户|未开通|无vip|已过期|过期)$/.test(text);
+}
+
+function qishuiMembershipLevelValue(value) {
+  const text = normalizeText(value).toLowerCase().replace(/[\s_-]+/g, '');
+  if (/^(svip|supervip|超级会员|超级vip|豪华会员)$/.test(text)) return 'svip';
+  if (/^(vip|premium|member|会员|普通会员)$/.test(text)) return 'vip';
+  if (/^(none|free|normal|ordinary|novip|非会员|普通用户|未开通|无vip|已过期|过期)$/.test(text)) return 'none';
+  return '';
+}
+
+function qishuiMembershipExpiryMillis(value) {
+  if (value === null || value === undefined || value === '') return 0;
+  const number = Number(value);
+  if (Number.isFinite(number) && number > 0) {
+    return number < 100000000000 ? number * 1000 : number;
+  }
+  const parsed = Date.parse(String(value));
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+function qishuiMembershipObjectState(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return { known: false, active: null, expiresAt: 0 };
+  }
+  let known = false;
+  let statusPositive = false;
+  let statusNegative = false;
+  let expiryExpired = false;
+  let futureExpiry = 0;
+  for (const [key, item] of Object.entries(value)) {
+    const normalizedKey = qishuiNormalizedFieldKey(key);
+    if (QISHUI_MEMBERSHIP_EXPIRY_KEYS.has(normalizedKey)) {
+      const expiresAt = qishuiMembershipExpiryMillis(item);
+      if (expiresAt > 0) {
+        known = true;
+        if (expiresAt <= Date.now()) {
+          expiryExpired = true;
+        } else if (!futureExpiry || expiresAt < futureExpiry) {
+          futureExpiry = expiresAt;
+        }
+      } else if (item !== '' && item !== null && item !== undefined && Number.isFinite(Number(item)) && Number(item) <= 0) {
+        known = true;
+        expiryExpired = true;
+      }
+      continue;
+    }
+    if (!QISHUI_MEMBERSHIP_STATUS_KEYS.has(normalizedKey)) continue;
+    if (qishuiExplicitNegative(item)) {
+      known = true;
+      statusNegative = true;
+    } else if (qishuiExplicitPositive(item)) {
+      known = true;
+      statusPositive = true;
+    }
+  }
+  const active = expiryExpired || statusNegative
+    ? false
+    : (futureExpiry > 0 || statusPositive ? true : null);
+  return {
+    known,
+    active,
+    expiresAt: active === true ? futureExpiry : 0,
+  };
+}
+
 function qishuiMembershipFromData(value) {
   value = value && typeof value === 'object' ? value : {};
-  let text = '';
-  try { text = JSON.stringify(value).toLowerCase(); } catch (_) {}
-  const pickNumber = (keys) => {
-    for (const key of keys) {
-      const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const match = text.match(new RegExp('"' + escaped + '"\\s*:\\s*"?([0-9]+)', 'i'));
-      if (match) {
-        const num = Number(match[1]);
-        if (Number.isFinite(num) && num > 0) return num;
-      }
+  let membershipKnown = false;
+  let isVip = false;
+  let isSvip = false;
+  let vipType = 0;
+  let svipType = 0;
+  let vipExpiresAt = 0;
+  let svipExpiresAt = 0;
+  let visited = 0;
+
+  const rememberExpiry = (level, expiresAt) => {
+    expiresAt = Number(expiresAt) || 0;
+    if (expiresAt <= Date.now()) return;
+    if (level === 'svip') {
+      if (!svipExpiresAt || expiresAt < svipExpiresAt) svipExpiresAt = expiresAt;
+      return;
     }
-    return 0;
+    if (level === 'vip' && (!vipExpiresAt || expiresAt < vipExpiresAt)) vipExpiresAt = expiresAt;
   };
-  const svipType = pickNumber(['svip_type', 'svipType', 'super_vip_level', 'superVipLevel', 'super_vip_type', 'superVipType']);
-  const vipType = pickNumber(['vip_type', 'vipType', 'member_type', 'memberType', 'vip_level', 'vipLevel', 'member_level', 'memberLevel']);
-  const isSvip = svipType > 0 || /svip|supervip|super_vip|超级会员|超级vip/.test(text);
-  const isVip = isSvip || vipType > 0 || /"is_vip"\s*:\s*true|"isvip"\s*:\s*true|vip|会员/.test(text);
+
+  const applyLevel = (level, numericValue, active, expiresAt) => {
+    if (active === false || !level) return;
+    if (level === 'svip') {
+      isSvip = true;
+      isVip = true;
+      svipType = Math.max(svipType, Number(numericValue) || 1);
+      rememberExpiry('svip', expiresAt);
+      return;
+    }
+    if (level === 'vip') {
+      isVip = true;
+      vipType = Math.max(vipType, Number(numericValue) || 1);
+      rememberExpiry('vip', expiresAt);
+    }
+  };
+
+  const visit = (node, depth) => {
+    if (!node || typeof node !== 'object' || depth > 6 || visited > 600) return;
+    visited += 1;
+    if (Array.isArray(node)) {
+      node.slice(0, 120).forEach(item => visit(item, depth + 1));
+      return;
+    }
+    const objectState = qishuiMembershipObjectState(node);
+    for (const [key, item] of Object.entries(node).slice(0, 160)) {
+      const normalizedKey = qishuiNormalizedFieldKey(key);
+      if (QISHUI_SVIP_NUMBER_KEYS.has(normalizedKey)) {
+        membershipKnown = true;
+        const number = Number(item);
+        if (Number.isFinite(number) && number > 0) applyLevel('svip', number, objectState.active, objectState.expiresAt);
+      } else if (QISHUI_VIP_NUMBER_KEYS.has(normalizedKey)) {
+        membershipKnown = true;
+        const number = Number(item);
+        if (Number.isFinite(number) && number > 0) applyLevel('vip', number, objectState.active, objectState.expiresAt);
+      } else if (QISHUI_SVIP_FLAG_KEYS.has(normalizedKey)) {
+        membershipKnown = true;
+        if (qishuiExplicitPositive(item)) applyLevel('svip', 1, objectState.active, objectState.expiresAt);
+      } else if (QISHUI_VIP_FLAG_KEYS.has(normalizedKey)) {
+        membershipKnown = true;
+        if (qishuiExplicitPositive(item)) applyLevel('vip', 1, objectState.active, objectState.expiresAt);
+      } else if (QISHUI_MEMBERSHIP_LABEL_KEYS.has(normalizedKey)) {
+        membershipKnown = true;
+        applyLevel(qishuiMembershipLevelValue(item), 1, objectState.active, objectState.expiresAt);
+      } else if (QISHUI_SVIP_CONTAINER_KEYS.has(normalizedKey) || QISHUI_VIP_CONTAINER_KEYS.has(normalizedKey)) {
+        membershipKnown = true;
+        const state = qishuiMembershipObjectState(item);
+        if (state.active === true) {
+          applyLevel(
+            QISHUI_SVIP_CONTAINER_KEYS.has(normalizedKey) ? 'svip' : 'vip',
+            1,
+            true,
+            state.expiresAt
+          );
+        }
+      }
+      if (item && typeof item === 'object') visit(item, depth + 1);
+    }
+  };
+
+  visit(value, 0);
+  if (isSvip) isVip = true;
   const vipLevel = isSvip ? 'svip' : (isVip ? 'vip' : 'none');
+  const activeExpiries = [vipExpiresAt, svipExpiresAt].filter(item => item > Date.now());
   return {
-    vipType: svipType || vipType,
+    membershipKnown,
+    vipType: isSvip ? svipType : vipType,
     vipLevel,
     isVip,
     isSvip,
     vipLabel: vipLevel === 'svip' ? 'SVIP' : (vipLevel === 'vip' ? 'VIP' : '无VIP'),
+    expiresAt: activeExpiries.length ? Math.min(...activeExpiries) : 0,
+  };
+}
+
+function qishuiPlaybackMembershipFromPayload(payload) {
+  const data = (payload && payload.data) || payload || {};
+  const trustedCandidates = [
+    data.user_membership,
+    data.userMembership,
+    data.account_membership,
+    data.accountMembership,
+    data.user && data.user.membership,
+    data.account && data.account.membership,
+    data.me && data.me.membership,
+  ].filter(item => item && typeof item === 'object');
+  if (trustedCandidates.length) {
+    const trusted = qishuiMembershipFromData({ membership_sources: trustedCandidates });
+    if (trusted.membershipKnown) return trusted;
+  }
+  const ambiguousCandidates = [
+    data.membership,
+    data.membership_info,
+    data.membershipInfo,
+  ].filter(item => item && typeof item === 'object');
+  // Generic membership blocks are ambiguous: track_v2 may use them for the
+  // media item's own restriction instead of the current account. Neither a
+  // positive nor a negative value here may grant or revoke account rights.
+  // Keep the read so future schema diagnostics can distinguish "absent" from
+  // "present but untrusted" without changing the authorization boundary.
+  void ambiguousCandidates;
+  return {
+    membershipKnown: false,
+    vipType: 0,
+    vipLevel: 'none',
+    isVip: false,
+    isSvip: false,
+    vipLabel: '无VIP',
+    expiresAt: 0,
   };
 }
 
@@ -1245,6 +1472,76 @@ function qishuiBestStreamCandidate(candidates) {
     if (qishuiBetterStreamCandidate(item, best)) best = item;
   });
   return best;
+}
+
+const QISHUI_TRACK_VIP_KEYS = new Set([
+  'onlyvipplayable', 'viprequired', 'needvip', 'isvip', 'isviponly', 'viponly', 'onlyvip',
+  'onlymemberplayable', 'memberrequired', 'needmember', 'payplay',
+]);
+const QISHUI_TRACK_ACCOUNT_CONTAINER_KEYS = new Set([
+  'membership', 'membershipinfo', 'usermembership', 'accountmembership',
+  'account', 'userinfo', 'userprofile', 'me',
+]);
+
+function qishuiTrackPlaybackRestriction(value) {
+  let vipRequired = false;
+  let membershipHintKnown = false;
+  let visited = 0;
+  const evidence = [];
+  const visit = (node, depth, pathKeys) => {
+    if (!node || typeof node !== 'object' || depth > 7 || visited > 800 || vipRequired) return;
+    visited += 1;
+    if (Array.isArray(node)) {
+      node.slice(0, 160).forEach(item => visit(item, depth + 1, pathKeys));
+      return;
+    }
+    for (const [key, item] of Object.entries(node).slice(0, 180)) {
+      const normalizedKey = qishuiNormalizedFieldKey(key);
+      const nextPath = pathKeys.concat(normalizedKey);
+      if (QISHUI_TRACK_ACCOUNT_CONTAINER_KEYS.has(normalizedKey)) continue;
+      if (QISHUI_TRACK_VIP_KEYS.has(normalizedKey)) {
+        membershipHintKnown = true;
+        if (qishuiExplicitPositive(item)) {
+          vipRequired = true;
+          evidence.push(nextPath.join('.'));
+          return;
+        }
+      } else if (normalizedKey === 'fee') {
+        membershipHintKnown = true;
+        if (Number(item) === 1) {
+          vipRequired = true;
+          evidence.push(nextPath.join('.'));
+          return;
+        }
+      } else if (normalizedKey === 'privilege') {
+        membershipHintKnown = true;
+        if (Number(item) >= 9) {
+          vipRequired = true;
+          evidence.push(nextPath.join('.'));
+          return;
+        }
+      }
+      if (item && typeof item === 'object') visit(item, depth + 1, nextPath);
+      if (vipRequired) return;
+    }
+  };
+  visit(value, 0, []);
+  return { vipRequired, membershipHintKnown, evidence };
+}
+
+function qishuiTrackRequiresVip(value) {
+  return qishuiTrackPlaybackRestriction(value).vipRequired;
+}
+
+function qishuiStreamAllowedForMembership(stream, membership) {
+  if (!stream || !stream.url) return false;
+  if (membership && membership.isVip) return true;
+  const rank = qishuiQualityRank(stream.quality, stream.format, stream.bitrate);
+  return rank <= 50;
+}
+
+function qishuiBestStreamCandidateForMembership(candidates, membership) {
+  return qishuiBestStreamCandidate((candidates || []).filter(item => qishuiStreamAllowedForMembership(item, membership)));
 }
 
 function qishuiStreamUrlFrom(value) {
@@ -1581,6 +1878,69 @@ async function qishuiWebRequestJson(apiPath, params, cookieText, opts) {
     }
   }
   throw lastErr || new Error('QISHUI_WEB_REQUEST_FAILED');
+}
+
+async function fetchQishuiPlaybackMembership(cookieText) {
+  const cookie = normalizeQishuiCookieInput(cookieText);
+  if (!qishuiCookieHasLogin(cookie)) {
+    return {
+      membershipKnown: false,
+      vipType: 0,
+      vipLevel: 'none',
+      isVip: false,
+      isSvip: false,
+      vipLabel: '无VIP',
+      expiresAt: 0,
+      sessionValidated: false,
+      error: 'QISHUI_COOKIE_REQUIRED',
+    };
+  }
+  const cacheKey = 'membership|' + qishuiCookieFingerprint(cookie);
+  return qishuiMembershipCache.wrap(cacheKey, qishuiMembershipCacheTtlMs, async () => {
+    try {
+      const json = await qishuiWebRequestJson('/luna/pc/me', qishuiPcAppParams(), cookie, {
+        bases: [QISHUI_WEB_PC_API_BASE],
+        noDefaultParams: true,
+        sessionOnly: true,
+        pcApp: true,
+        timeoutMs: 6500,
+      });
+      const data = (json && json.data) || json || {};
+      const profile = qishuiProfileFromMeData(data);
+      return {
+        membershipKnown: !!profile.membershipKnown,
+        vipType: Number(profile.vipType) || 0,
+        vipLevel: profile.vipLevel || 'none',
+        isVip: !!profile.isVip,
+        isSvip: !!profile.isSvip,
+        vipLabel: profile.vipLabel || '无VIP',
+        expiresAt: Number(profile.expiresAt) || 0,
+        sessionValidated: !!profile.profileReady,
+        userId: profile.userId || '',
+      };
+    } catch (err) {
+      return {
+        membershipKnown: false,
+        vipType: 0,
+        vipLevel: 'none',
+        isVip: false,
+        isSvip: false,
+        vipLabel: '无VIP',
+        expiresAt: 0,
+        sessionValidated: false,
+        error: err && err.message || 'QISHUI_MEMBERSHIP_CHECK_FAILED',
+      };
+    }
+  });
+}
+
+function qishuiMembershipCacheTtlMs(membership) {
+  const maxTtlMs = 60 * 1000;
+  const expiresAt = Number(membership && membership.expiresAt) || 0;
+  if (!(membership && membership.isVip) || expiresAt <= 0) return maxTtlMs;
+  const remainingMs = expiresAt - Date.now();
+  if (remainingMs <= 0) return 1;
+  return Math.max(1, Math.min(maxTtlMs, remainingMs - 250));
 }
 
 async function qishuiPcPostJson(apiPath, payload, cookieText, opts) {
@@ -1951,6 +2311,7 @@ async function handleQishuiStatus(cookieText) {
       status.isVip = !!profile.isVip;
       status.isSvip = !!profile.isSvip;
       status.vipLabel = profile.vipLabel || (status.vipLevel === 'svip' ? 'SVIP' : (status.vipLevel === 'vip' ? 'VIP' : '无VIP'));
+      status.membershipKnown = !!profile.membershipKnown;
       status.profileReady = true;
     }
     status.libraryReady = true;
@@ -3006,19 +3367,23 @@ async function fetchQishuiPcTrackV2Get(trackId, cookieText) {
 }
 
 async function fetchQishuiPcTrackV2(trackId, cookieText) {
-  try {
-    return await fetchQishuiPcTrackV2Post(trackId, cookieText);
-  } catch (postError) {
+  const cookie = normalizeQishuiCookieInput(cookieText);
+  const cacheKey = 'track-v2-meta|' + qishuiCookieFingerprint(cookie) + '|' + normalizeText(trackId);
+  return qishuiTrackMetadataCache.wrap(cacheKey, 20 * 1000, async () => {
     try {
-      return await fetchQishuiPcTrackV2Get(trackId, cookieText);
-    } catch (getError) {
-      getError.postError = postError && postError.message || String(postError);
-      throw getError;
+      return await fetchQishuiPcTrackV2Post(trackId, cookie);
+    } catch (postError) {
+      try {
+        return await fetchQishuiPcTrackV2Get(trackId, cookie);
+      } catch (getError) {
+        getError.postError = postError && postError.message || String(postError);
+        throw getError;
+      }
     }
-  }
+  });
 }
 
-async function fetchQishuiPlayerInfo(playerInfoUrl, cookieText) {
+async function fetchQishuiPlayerInfo(playerInfoUrl, cookieText, membership) {
   playerInfoUrl = normalizeText(playerInfoUrl);
   if (!/^https?:\/\//i.test(playerInfoUrl)) return null;
   const json = await requestJson(playerInfoUrl, {
@@ -3033,7 +3398,7 @@ async function fetchQishuiPlayerInfo(playerInfoUrl, cookieText) {
   const data = pickObject(result.Data, result.data, json && json.Data, json && json.data);
   const list = pickArray(data.PlayInfoList, data.playInfoList, data.play_info_list, json && json.PlayInfoList);
   const streams = list.map(item => qishuiStreamFromObject(item)).filter(Boolean);
-  const best = qishuiBestStreamCandidate(streams);
+  const best = qishuiBestStreamCandidateForMembership(streams, membership);
   if (best) return best;
   const error = pickObject(json && json.ResponseMetadata && json.ResponseMetadata.Error, json && json.responseMetadata && json.responseMetadata.error);
   if (error && (error.Message || error.message)) throw new Error(normalizeText(error.Message || error.message));
@@ -3060,22 +3425,27 @@ function collectQishuiTrackV2Streams(payload) {
   return { track, player, streams, fallbackStreams };
 }
 
-async function resolveQishuiDownloadInfo(trackId, payload, cookieText) {
+async function resolveQishuiDownloadInfo(trackId, payload, cookieText, membership) {
   const collected = collectQishuiTrackV2Streams(payload);
   const playerInfoUrl = qishuiObjectString(collected.player, ['url_player_info', 'URLPlayerInfo', 'urlPlayerInfo']);
   if (playerInfoUrl) {
     try {
-      const stream = await fetchQishuiPlayerInfo(playerInfoUrl, cookieText);
+      const stream = await fetchQishuiPlayerInfo(playerInfoUrl, cookieText, membership);
       if (stream) collected.streams.push(stream);
     } catch (err) {
       collected.playerInfoError = err && err.message || String(err);
     }
   }
-  const best = qishuiBestStreamCandidate(collected.streams) ||
-    qishuiBestStreamCandidate(collected.fallbackStreams);
+  const best = qishuiBestStreamCandidateForMembership(collected.streams, membership) ||
+    qishuiBestStreamCandidateForMembership(collected.fallbackStreams, membership);
   if (!best) {
-    const err = new Error(collected.playerInfoError || 'QISHUI_AUDIO_SOURCE_EMPTY');
-    err.code = 'QISHUI_AUDIO_SOURCE_EMPTY';
+    const unrestricted = qishuiBestStreamCandidate(collected.streams) ||
+      qishuiBestStreamCandidate(collected.fallbackStreams);
+    const entitlementLimited = !!(unrestricted && !(membership && membership.isVip));
+    const err = new Error(entitlementLimited
+      ? 'QISHUI_STANDARD_AUDIO_SOURCE_EMPTY'
+      : (collected.playerInfoError || 'QISHUI_AUDIO_SOURCE_EMPTY'));
+    err.code = entitlementLimited ? 'QISHUI_STANDARD_AUDIO_SOURCE_EMPTY' : 'QISHUI_AUDIO_SOURCE_EMPTY';
     throw err;
   }
   return Object.assign(collected, { best });
@@ -3100,11 +3470,47 @@ async function handleQishuiSongUrl(opts, cookieText) {
     });
   }
   const requestedQuality = normalizeText(opts.quality || '');
-  const cacheKey = 'track-v2|' + qishuiCookieFingerprint(cookie) + '|' + id + '|' + requestedQuality;
+  let payload;
+  try {
+    payload = await fetchQishuiPcTrackV2(id, cookie);
+  } catch (err) {
+    return qishuiUnavailable('Qishui did not return track playback metadata: ' + (err && err.message || String(err)), 'source_unavailable', {
+      loggedIn: true,
+      playbackKeyReady: false,
+      membershipKnown: false,
+      vipType: 0,
+      vipLevel: 'none',
+      isVip: false,
+      isSvip: false,
+      vipLabel: '无VIP',
+      rawError: err && err.message || String(err),
+    });
+  }
+  let membership = qishuiPlaybackMembershipFromPayload(payload);
+  if (!membership.membershipKnown) membership = await fetchQishuiPlaybackMembership(cookie);
+  const membershipKey = membership.isSvip
+    ? 'svip'
+    : (membership.isVip ? 'vip' : (membership.membershipKnown ? 'free' : 'unknown'));
+  const cacheKey = 'track-v2|' + qishuiCookieFingerprint(cookie) + '|' + membershipKey + '|' + id + '|' + requestedQuality;
   return qishuiPlaybackCache.wrap(cacheKey, 4 * 60 * 1000, async () => {
     try {
-      const payload = await fetchQishuiPcTrackV2(id, cookie);
-      const resolved = await resolveQishuiDownloadInfo(id, payload, cookie);
+      const trackRestriction = qishuiTrackPlaybackRestriction(payload);
+      const requestRestriction = qishuiTrackPlaybackRestriction(opts);
+      if ((trackRestriction.vipRequired || requestRestriction.vipRequired) && !membership.isVip) {
+        return qishuiUnavailable('汽水音乐歌曲需要会员权限，当前账号未取得可验证的会员权益。', 'vip_required', {
+          loggedIn: true,
+          playbackKeyReady: true,
+          vipRequired: true,
+          membershipKnown: !!membership.membershipKnown,
+          vipType: membership.vipType || 0,
+          vipLevel: membership.vipLevel || 'none',
+          isVip: false,
+          isSvip: false,
+          vipLabel: '无VIP',
+          entitlementEvidence: trackRestriction.evidence.concat(requestRestriction.evidence),
+        });
+      }
+      const resolved = await resolveQishuiDownloadInfo(id, payload, cookie, membership);
       const track = resolved.track || {};
       const stream = resolved.best;
       const duration = stream.duration || qishuiNormalizeDurationSeconds(track.duration_ms || track.duration || 0);
@@ -3119,6 +3525,12 @@ async function handleQishuiSongUrl(opts, cookieText) {
         trial,
         loggedIn: true,
         playbackKeyReady: true,
+        membershipKnown: !!membership.membershipKnown,
+        vipType: membership.vipType || 0,
+        vipLevel: membership.vipLevel || 'none',
+        isVip: !!membership.isVip,
+        isSvip: !!membership.isSvip,
+        vipLabel: membership.vipLabel || (membership.isVip ? 'VIP' : '无VIP'),
         level,
         quality: normalizeText(stream.quality || stream.format || level),
         br: qishuiBitrateForUi(stream.bitrate),
@@ -3129,9 +3541,20 @@ async function handleQishuiSongUrl(opts, cookieText) {
         encrypted: !!stream.auth,
       };
     } catch (err) {
-      return qishuiUnavailable('Qishui did not return a playable audio source: ' + (err && err.message || String(err)), 'source_unavailable', {
+      const standardOnly = !!(err && err.code === 'QISHUI_STANDARD_AUDIO_SOURCE_EMPTY');
+      return qishuiUnavailable(
+        standardOnly
+          ? '汽水音乐没有为当前普通或未知会员状态返回标准音质的可播放地址。'
+          : 'Qishui did not return a playable audio source: ' + (err && err.message || String(err)),
+        standardOnly ? 'quality_unavailable' : 'source_unavailable', {
         loggedIn: true,
         playbackKeyReady: true,
+        membershipKnown: !!membership.membershipKnown,
+        vipType: membership.vipType || 0,
+        vipLevel: membership.vipLevel || 'none',
+        isVip: !!membership.isVip,
+        isSvip: !!membership.isSvip,
+        vipLabel: membership.vipLabel || (membership.isVip ? 'VIP' : '无VIP'),
         rawError: err && err.message || String(err),
       });
     }
@@ -3171,5 +3594,12 @@ module.exports = {
     qishuiConvertLyric,
     extractQishuiLyrics,
     collectQishuiTrackV2Streams,
+    qishuiMembershipFromData,
+    qishuiPlaybackMembershipFromPayload,
+    qishuiMembershipCacheTtlMs,
+    qishuiTrackPlaybackRestriction,
+    qishuiTrackRequiresVip,
+    qishuiStreamAllowedForMembership,
+    qishuiBestStreamCandidateForMembership,
   },
 };

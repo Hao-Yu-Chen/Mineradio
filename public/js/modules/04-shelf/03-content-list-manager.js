@@ -656,6 +656,7 @@ function makeContentListManager() {
       contentCoverPrefetchKey = '';
       if (!group) {
         group = new THREE.Group();
+        group.renderOrder = 320;
         scene.add(group);
       }
       var openLayout = detailLayout();

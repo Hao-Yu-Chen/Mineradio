@@ -1419,7 +1419,13 @@ function checkQishuiProviderGuard() {
   if (!/\/luna\/pc\/track_v2/.test(qishuiText) || !/function fetchQishuiPcTrackV2/.test(qishuiText) || !/function resolveQishuiDownloadInfo/.test(qishuiText) || !/play_info_list/.test(qishuiText) || !/url_player_info/.test(qishuiText) || !/video_model/.test(qishuiText)) {
     fail('Qishui playback must resolve PC track_v2 audio from play_info_list, url_player_info, or video_model');
   }
-  if (!/handleQishuiSongUrl\(\{[\s\S]{0,160}quality: url\.searchParams\.get\('quality'\)[\s\S]{0,80}, qishuiCookie\)/.test(serverText)) {
+  const qishuiSongRouteStart = serverText.indexOf("if (pn === '/api/qishui/song/url')");
+  const qishuiSongRouteEnd = serverText.indexOf("if (pn === '/api/qishui/lyric')", qishuiSongRouteStart);
+  const qishuiSongRouteText = serverText.slice(qishuiSongRouteStart, qishuiSongRouteEnd);
+  if (qishuiSongRouteStart < 0 || qishuiSongRouteEnd <= qishuiSongRouteStart ||
+      !/handleQishuiSongUrl\(\{/.test(qishuiSongRouteText) ||
+      !/quality: url\.searchParams\.get\('quality'\)/.test(qishuiSongRouteText) ||
+      !/\}, qishuiCookie\)/.test(qishuiSongRouteText)) {
     fail('server.js must pass the saved Qishui cookie into /api/qishui/song/url');
   }
   if (!/TrackDecryptor/.test(serverText) || !/qishui-audio-decryptor/.test(serverText) || !/function getQishuiDecryptedAudio/.test(serverText) || !/audioUrl\.includes\('#auth='\)/.test(serverText) || !/sendAudioBuffer/.test(serverText)) {
@@ -2222,35 +2228,58 @@ function checkSearchGlassEntranceGuard() {
   console.log('[OK] Search glass uses the saved RGB SVG surface and is composited before the search panel appears.');
 }
 
-function checkKugouVipEvidenceGuard() {
-  logStep('Kugou VIP playback evidence guard');
+function checkProviderEntitlementBoundaryGuard() {
+  logStep('Provider entitlement boundary guard');
   const kugouText = fs.readFileSync(path.join(appRoot, 'kugou-api.js'), 'utf8');
+  const qishuiText = fs.readFileSync(path.join(appRoot, 'qishui-api.js'), 'utf8');
+  const serverText = fs.readFileSync(path.join(appRoot, 'server.js'), 'utf8');
   const mainText = fs.readFileSync(path.join(appRoot, 'desktop', 'main.js'), 'utf8');
   const loginText = fs.readFileSync(path.join(appRoot, 'public', 'js', 'modules', '08-account', '02-login-status.js'), 'utf8');
   const userModalText = fs.readFileSync(path.join(appRoot, 'public', 'js', 'modules', '08-account', '04-user-modal-logout.js'), 'utf8');
   const playbackText = fs.readFileSync(path.join(appRoot, 'public', 'js', 'modules', '05-playback', '13-playback-start-audio.js'), 'utf8');
-  if (!/kugouPlaybackVipEvidenceCache/.test(kugouText) || !/function rememberKugouPlaybackVipEvidence/.test(kugouText) || !/member-track-playback/.test(kugouText) || !/premium-quality-playback/.test(kugouText)) {
-    fail('Kugou must keep playback-success VIP evidence when status endpoints omit membership fields');
+  if (/rememberKugouPlaybackVipEvidence|mergeKugouPlaybackVipEvidence|premium-quality-playback|member-track-playback/.test(kugouText)) {
+    fail('Kugou playback success must never be promoted into account membership evidence');
   }
-  if (!/KUGOU_VIP_EVIDENCE_FILE/.test(kugouText) || !/saveKugouPlaybackVipEvidenceStore/.test(kugouText) || !/readKugouPlaybackVipEvidence/.test(kugouText) || !/KUGOU_VIP_EVIDENCE_FILE/.test(mainText)) {
-    fail('Kugou playback VIP evidence must persist in userData so status refresh and app restart keep the badge');
+  if (!/function normalizeKugouVipPayloadV2/.test(kugouText) ||
+      /\/vip\|member\|music_pack\//.test(kugouText) ||
+      /const vipText = Object\.keys/.test(kugouText) ||
+      !/const apiMembershipKnown = payloadObjects\.some\(kugouObjectHasMembershipSignal\)/.test(kugouText) ||
+      !/membershipVerified:\s*membershipKnown/.test(kugouText) ||
+      !/membershipSource:\s*apiMembershipKnown[\s\S]*?'kugou-vip-api'/.test(kugouText)) {
+    fail('Kugou membership must come from explicit positive API or cookie fields, never field-name text');
   }
-  if (!/function getKugouVipEvidenceFile\(\)/.test(kugouText) || !/const evidenceFile = getKugouVipEvidenceFile\(\)/.test(kugouText) || /const\s+KUGOU_VIP_EVIDENCE_FILE\s*=\s*process\.env\.KUGOU_VIP_EVIDENCE_FILE/.test(kugouText)) {
-    fail('Kugou VIP evidence file path must be resolved lazily after Electron sets userData env paths');
+  if (!/function kugouPlaybackCacheScope/.test(kugouText) ||
+      !/kugouPlaybackCacheScope\(auth, membership\)/.test(kugouText) ||
+      !/membership\.isVip \? '1' : '65530'/.test(kugouText)) {
+    fail('Kugou URL resolution must isolate caches by account and only send VIP mode for verified members');
   }
-  if (!/mergeKugouPlaybackVipEvidence\(normalizeKugouVipPayloadV2\(vipProbe, auth\), readKugouPlaybackVipEvidence\(cookie, auth\)\)/.test(kugouText)) {
-    fail('Kugou login status must merge explicit VIP fields with playback evidence');
+  if (!/kugouPlaybackParamsRequireVip\(params\)/.test(kugouText) ||
+      !/memberTrack && !membership\.isVip/.test(kugouText) ||
+      !/effectiveQuality = membership\.isVip \? requestedQuality : 'standard'/.test(kugouText)) {
+    fail('Kugou member tracks and premium qualities must be denied or downgraded for ordinary accounts');
   }
-  if (!/vipRequired=/.test(playbackText) || !/privilege=/.test(playbackText) || !/fee=/.test(playbackText)) {
-    fail('Kugou playback requests must pass member-track hints into the URL resolver');
+  if (!/api\/kugou\/song\/url/.test(serverText) || !/api\/qishui\/song\/url/.test(serverText) ||
+      !/onlyVipPlayable/.test(serverText) || !/privilege/.test(serverText) || !/fee/.test(serverText) ||
+      !/qqPlaybackEvidenceQuery\(song\) \+ qualityParam/.test(playbackText)) {
+    fail('Kugou and Qishui playback requests must carry track entitlement hints through the server boundary');
   }
-  if (!/function applyKugouPlaybackStatusEvidence/.test(loginText) || !/applyKugouPlaybackStatusEvidence\(data\)/.test(playbackText)) {
-    fail('Kugou playback status evidence must refresh the visible login/VIP badge immediately');
+  if (!/function qishuiMembershipFromData/.test(qishuiText) ||
+      !/function qishuiTrackRequiresVip/.test(qishuiText) ||
+      !/vip_required/.test(qishuiText)) {
+    fail('Qishui must strictly separate account membership from track-level VIP restrictions');
+  }
+  if (!/verifiedMembership/.test(loginText) ||
+      !/membershipSource === 'kugou-vip-api'/.test(loginText) ||
+      !/applyKugouPlaybackStatusEvidence\(data\)/.test(playbackText)) {
+    fail('Kugou playback responses may update badges only when they carry verified membership API state');
+  }
+  if (!/\.kugou-vip-evidence\.json/.test(mainText) || !/unlink/.test(mainText)) {
+    fail('Startup migration must delete deprecated persisted Kugou playback evidence for existing users');
   }
   if (!/kgVipLevel === 'svip'/.test(userModalText) || !/酷狗 SVIP 会员/.test(userModalText)) {
     fail('Kugou account modal must distinguish SVIP from normal VIP');
   }
-  console.log('[OK] Kugou VIP badge can fall back to playback evidence without overclaiming SVIP.');
+  console.log('[OK] Provider account membership and per-track playback entitlement remain separated.');
 }
 
 function checkQQVipStatusSyncGuard() {
@@ -5187,7 +5216,7 @@ async function main() {
   checkPlaybackControlBadgesGuard();
   await checkProviderFallbackTerminalStateGuard();
   checkSearchGlassEntranceGuard();
-  checkKugouVipEvidenceGuard();
+  checkProviderEntitlementBoundaryGuard();
   checkQQVipStatusSyncGuard();
   await checkProviderAuthCookiePathGuard();
   checkPlaybackResumeRecoveryGuard();

@@ -1,5 +1,7 @@
 function uiAccentHex(fallback) {
-  return normalizeHexColor((fx && fx.uiAccentColor) || fallback || '#00f5d4', fallback || '#00f5d4');
+  var defaultAccent = normalizeHexColor(fxDefaults.uiAccentColor || '#ffffff', '#ffffff');
+  var fallbackAccent = normalizeHexColor(fallback || defaultAccent, defaultAccent);
+  return normalizeHexColor((fx && fx.uiAccentColor) || fallbackAccent, fallbackAccent);
 }
 function uiAccentRgba(alpha, fallback) {
   var c = hexToRgb(uiAccentHex(fallback));

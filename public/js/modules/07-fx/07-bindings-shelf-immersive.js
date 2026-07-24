@@ -185,7 +185,12 @@ function bindFxPanel() {
   var uiAccentPicker = document.getElementById('ui-accent-picker');
   if (uiAccentPicker) {
     uiAccentPicker.addEventListener('input', function () { setUiAccentColor(uiAccentPicker.value, true); });
-    uiAccentPicker.addEventListener('change', function () { showToast('界面高亮: ' + normalizeHexColor(uiAccentPicker.value, '#00f5d4').toUpperCase()); });
+    uiAccentPicker.addEventListener('change', function () {
+      showToast('界面高亮: ' + normalizeHexColor(
+        uiAccentPicker.value,
+        fxDefaults.uiAccentColor || '#ffffff'
+      ).toUpperCase());
+    });
   }
   var visualTintPicker = document.getElementById('visual-tint-picker');
   if (visualTintPicker) {

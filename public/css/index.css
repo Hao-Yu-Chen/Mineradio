@@ -295,9 +295,9 @@ html.desktop-shell-root body {
   --fc-muted: #8A9099;
   --fc-hair: #1A1D22;
   --fc-hair-2: #262A31;
-  --fc-accent: #00F5D4;
-  --fc-accent-hov: #00E0BE;
-  --fc-accent-rgb: 0, 245, 212;
+  --fc-accent: #FFFFFF;
+  --fc-accent-hov: #FFFFFF;
+  --fc-accent-rgb: 255, 255, 255;
   --fc-blue: #2442ff;
   --fc-warm: #f8f4ee;
   --chill-ink: #030608;
