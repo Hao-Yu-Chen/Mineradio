@@ -8,8 +8,8 @@
   "private": true,
   "scripts": {
     "start": "electron .",
-    "build:win": "electron-builder --win nsis",
-    "build:win:dir": "electron-builder --win dir"
+    "build:win": "set ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/&& set ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/&& electron-builder --win nsis",
+    "build:win:dir": "set ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/&& set ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/&& electron-builder --win dir"
   },
   "build": {
     "appId": "com.mineradio.desktop",
@@ -27,6 +27,8 @@
       "public/**/*",
       "build/**/*",
       "server.js",
+      "lx-source-engine.js",
+      "lx-search.js",
       "dj-analyzer.js",
       "package.json",
       "!public/index.*.html",

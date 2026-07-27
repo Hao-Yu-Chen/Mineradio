@@ -64,3 +64,4 @@ android/www/nodejs-project/package-lock.json
 .superpowers/
 lx-music-desktop/
 *.apk
+/.idea/*

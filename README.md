@@ -1,8 +1,8 @@
 # Mineradio
 
-Windows Electron 桌面 + Android 沉浸式音乐播放器。整合天气电台、多源搜索播放、歌词舞台、粒子视觉、3D 歌单架和 LX Music 音源系统。
+Windows Electron 桌面 + Android 沉浸式音乐播放器。整合天气电台、搜索播放、歌词舞台、粒子视觉、3D 歌单架和可扩展音源系统。
 
-> **声明**：本项目是基于 [XxHuberrr/Mineradio](https://github.com/XxHuberrr/Mineradio.git) 的二次开发版本，增加了队列持久化、LX 模式记忆修复、空队列粒子初始化、Android APK 构建适配等功能改进。
+> **声明**：本项目是基于 [XxHuberrr/Mineradio](https://github.com/XxHuberrr/Mineradio.git) 的二次开发版本，增加了队列持久化、播放模式记忆修复、空队列粒子初始化、Android APK 构建适配等功能改进。本项目仅供学习研究。
 
 ---
 
@@ -41,10 +41,6 @@ cd android && build-apk.bat --release     # → android/Mineradio-release.apk
 
 ![PC 歌单页面](docs/screenshots/pc端歌单页面.png)
 
-**LX Music 落雪音源配置**
-
-![PC 落雪音源](docs/screenshots/pc端落雪源配置界面.png)
-
 **多来源搜索筛选**
 
 ![多来源搜索](docs/screenshots/根据源的不同来源可以进行查询筛选页面.png)
@@ -57,16 +53,16 @@ cd android && build-apk.bat --release     # → android/Mineradio-release.apk
 
 ![Android 歌单](docs/screenshots/android端歌单页面.png)
 
-**LX 落雪源配置**
+**扩展音源配置**
 
-![Android 落雪源](docs/screenshots/android端落雪源配置页面.png)
+![Android 扩展音源](docs/screenshots/android端落雪源配置页面.png)
 
 ---
 
 ## 核心特性
 
-- **多音源搜索播放** — 网易云音乐、QQ 音乐、酷我、酷狗、咪咕，支持 LX Music（落雪音乐）自定义 `.js` 音源脚本
-- **LX Music 音源集成** — VM 沙箱引擎兼容 `globalThis.lx` API，在线/本地导入，多源搜索播放，独立歌单与红心系统，播放失败自动换源
+- **多音源搜索播放** — 支持多种音源接入
+- **可扩展音源系统** — 插件式架构，支持自定义音源扩展
 - **Open-Meteo 天气电台** — 根据天气 mood 生成播放队列
 - **粒子视觉** — 封面粒子系统，节奏驱动电影镜头，空场星空壁纸
 - **3D 歌单架** — 右键唤起，支持常驻与动态镜头
