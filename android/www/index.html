@@ -10,7 +10,7 @@
 <script src="vendor/music-tempo.min.js"></script>
 <script src="vendor/gsap.min.js"></script>
 <script>
-try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+try {
   document.documentElement.classList.add(localStorage.getItem('mineradio-diy-player-mode-v1') === '1' ? 'diy-mode-preload' : 'diy-mode-preload');
 } catch (e) {
   document.documentElement.classList.add('diy-mode-preload');
@@ -207,21 +207,21 @@ body.empty-home-active.diy-mode #search-area:not(.has-results) #search-mode-tabs
 .search-result .add-btn{width:28px;height:28px;border-radius:50%;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.05);color:rgba(255,255,255,.55);cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .2s}
 .search-result .add-btn:hover{background:rgba(0,245,212,.12);color:#eafffb;border-color:rgba(0,245,212,.34)}
 
-html.simple-mode-preload #search-mode-tabs,
-html.simple-mode-preload #upload-actions,
-html.simple-mode-preload #fx-fab,
-html.simple-mode-preload #fx-fab-hide-btn,
-html.simple-mode-preload #fx-panel,
+html.diy-mode-preload #search-mode-tabs,
+html.diy-mode-preload #upload-actions,
+html.diy-mode-preload #fx-fab,
+html.diy-mode-preload #fx-fab-hide-btn,
+html.diy-mode-preload #fx-panel,
 body.simple-mode #search-mode-tabs,
 body.simple-mode #upload-actions,
 body.simple-mode #fx-fab,
 body.simple-mode #fx-fab-hide-btn,
 body.simple-mode #fx-panel{display:none!important}
-html.simple-mode-preload #search-area,
+html.diy-mode-preload #search-area,
 body.simple-mode #search-area{--search-offset:0;left:50%;width:min(620px,calc(100vw - 56px));transform:translateX(-50%);align-items:stretch}
 body.simple-mode #search-area.peek{top:24px}
 body.desktop-shell.simple-mode #search-area.peek{top:34px}
-html.simple-mode-preload #search-stack,
+html.diy-mode-preload #search-stack,
 body.simple-mode #search-stack{width:100%}
 body.simple-mode #search-box{height:58px;border-radius:22px;background:var(--glass-bg);border-color:var(--glass-border);box-shadow:var(--glass-shadow)}
 body.simple-mode #search-box:focus-within{border-color:rgba(0,245,212,.50);background:var(--glass-bg-focus);box-shadow:var(--glass-shadow-focus)}
@@ -2827,7 +2827,7 @@ var collectTargetSong = null, collectBusy = false;
 var LX_PLAYLISTS_KEY = 'mineradio-lx-playlists-v2';
 var lxPlaylists = []; // [{ id, name, songs: [{full song info}], createdAt }]
 (function(){
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1'); lxPlaylists = JSON.parse(localStorage.getItem(LX_PLAYLISTS_KEY)) || []; } catch(e) { lxPlaylists = []; }
+  try { lxPlaylists = JSON.parse(localStorage.getItem(LX_PLAYLISTS_KEY)) || []; } catch(e) { lxPlaylists = []; }
   // Ensure "我的喜欢" always exists
   if (!lxPlaylists.find(function(p){ return p.id === 'lx_fav'; })) {
     lxPlaylists.unshift({ id: 'lx_fav', name: '我的喜欢', songs: [], createdAt: new Date().toISOString() });
@@ -2855,7 +2855,7 @@ function lxStoreSong(song) {
     hash: song.hash || '', copyrightId: song.copyrightId || ''
   };
 }
-function saveLxPlaylists() { try { localStorage.setItem('mineradio-diy-player-mode-v1','1'); localStorage.setItem(LX_PLAYLISTS_KEY, JSON.stringify(lxPlaylists)); } catch(e) {} }
+function saveLxPlaylists() { try { localStorage.setItem(LX_PLAYLISTS_KEY, JSON.stringify(lxPlaylists)); } catch(e) {} }
 function addToLxPlaylist(plId, song) {
   var pl = lxPlaylists.find(function(p) { return p.id === plId; });
   if (!pl) return;
@@ -2962,7 +2962,7 @@ var listenStatsState = loadListenStatsState();
 var listenSession = null;
 var appPerfMarks = [];
 function markAppPerf(name) {
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     var value = performance.now();
     appPerfMarks.push({ name: name, value: Math.round(value) });
     if (performance && performance.mark) performance.mark('mineradio:' + name);
@@ -2971,7 +2971,7 @@ function markAppPerf(name) {
 }
 markAppPerf('script-start');
 function installStartupLongTaskObserver() {
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     if (!('PerformanceObserver' in window)) return;
     var observer = new PerformanceObserver(function(list){
       list.getEntries().forEach(function(entry){
@@ -2980,7 +2980,7 @@ function installStartupLongTaskObserver() {
       });
     });
     observer.observe({ entryTypes: ['longtask'] });
-    setTimeout(function(){ try { localStorage.setItem('mineradio-diy-player-mode-v1','1'); observer.disconnect(); } catch (e) {} }, 16000);
+    setTimeout(function(){ try { observer.disconnect(); } catch (e) {} }, 16000);
   } catch (e) {}
 }
 installStartupLongTaskObserver();
@@ -3039,7 +3039,7 @@ var updatePreviewState = {
   ]
 };
 function readSavedVolume() {
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     var v = parseFloat(localStorage.getItem('apex-player-volume'));
     return isFinite(v) ? Math.max(0, Math.min(1, v)) : 1.0;
   } catch (e) {
@@ -3047,13 +3047,13 @@ function readSavedVolume() {
   }
 }
 function readDiyModePreference() {
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1'); return localStorage.getItem(DIY_MODE_STORE_KEY) === '1'; } catch (e) { return false; }
+  try { return localStorage.getItem(DIY_MODE_STORE_KEY) === '1'; } catch (e) { return false; }
 }
 function saveDiyModePreference(on) {
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1'); localStorage.setItem(DIY_MODE_STORE_KEY, on ? '1' : '0'); } catch (e) {}
+  try { localStorage.setItem(DIY_MODE_STORE_KEY, on ? '1' : '0'); } catch (e) {}
 }
 function readBooleanPreference(key, fallback) {
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     var raw = localStorage.getItem(key);
     if (raw == null) return !!fallback;
     return raw === '1';
@@ -3062,7 +3062,7 @@ function readBooleanPreference(key, fallback) {
   }
 }
 function saveBooleanPreference(key, on) {
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1'); localStorage.setItem(key, on ? '1' : '0'); } catch (e) {}
+  try { localStorage.setItem(key, on ? '1' : '0'); } catch (e) {}
 }
 function applyUserCapsuleAutoHideState() {
   document.body.classList.toggle('user-capsule-auto-hide', !!userCapsuleAutoHide);
@@ -3592,7 +3592,7 @@ function normalizeDevelopmentLockedFxState() {
   fx.wallpaperMode = false;
 }
 function readSavedPlaybackVisualPreset() {
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     var raw = JSON.parse(localStorage.getItem(LYRIC_LAYOUT_STORE_KEY) || '{}') || {};
     if (!Object.prototype.hasOwnProperty.call(raw, 'preset')) return fxDefaults.preset;
     var savedPreset = clampRange(Number(raw.preset) || 0, 0, 6);
@@ -3692,7 +3692,7 @@ function updateRenderPowerClasses() {
   document.body.classList.toggle('render-background-eco', isVisibleBackgroundMode());
 }
 function safeObjectKeys(obj) {
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1'); return obj ? Object.keys(obj) : []; } catch (e) { return []; }
+  try { return obj ? Object.keys(obj) : []; } catch (e) { return []; }
 }
 function markProtectedKey(map, key) {
   if (key) map[String(key)] = true;
@@ -3700,7 +3700,7 @@ function markProtectedKey(map, key) {
 function collectProtectedCoverUrls() {
   var keep = Object.create(null);
   function mark(url) { if (url) keep[String(url)] = true; }
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     var song = (typeof currentCoverSong === 'function') ? currentCoverSong() : (playQueue && currentIdx >= 0 ? playQueue[currentIdx] : null);
     if (song) {
       mark(song.cover);
@@ -3729,7 +3729,7 @@ function collectProtectedCoverUrls() {
 }
 function collectProtectedBeatMapKeys() {
   var keep = Object.create(null);
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     if (typeof beatMapSongKey === 'function' && playQueue && playQueue.length) {
       var start = Math.max(0, currentIdx - 5);
       var end = Math.min(playQueue.length - 1, currentIdx + 5);
@@ -3745,7 +3745,7 @@ function collectProtectedBeatMapKeys() {
 }
 function collectProtectedCoverDepthIds() {
   var keep = Object.create(null);
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     if (typeof coverDepthCacheId !== 'function') return keep;
     var candidates = [];
     if (typeof currentCoverSource !== 'undefined' && currentCoverSource && currentCoverSource.src) candidates.push(currentCoverSource.src);
@@ -3855,7 +3855,7 @@ function trimRuntimeCaches(reason, aggressive) {
   dropped += trimObjectCache(beatMapCache, aggressive ? 12 : 36, protectedBeats);
   dropped += trimObjectCache(djBeatMapCache, aggressive ? 4 : 12, protectedBeats);
   if (aggressive && typeof renderer !== 'undefined' && renderer && renderer.renderLists && renderer.renderLists.dispose) {
-    try { localStorage.setItem('mineradio-diy-player-mode-v1','1'); renderer.renderLists.dispose(); } catch (e) {}
+    try { renderer.renderLists.dispose(); } catch (e) {}
   }
   runtimePerfState.lastCacheTrimAt = performance.now();
   runtimePerfState.cacheTrimCount += 1;
@@ -4059,7 +4059,7 @@ function defaultFreeCameraState() {
 }
 function readFreeCameraState() {
   var state = defaultFreeCameraState();
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     var raw = JSON.parse(localStorage.getItem(FREE_CAMERA_STORE_KEY) || '{}') || {};
     if (raw.position) {
       state.position.set(
@@ -4089,7 +4089,7 @@ var freeCameraPointer = { seen: false, x: 0, y: 0 };
 var freeCameraDeferredSaveTimer = 0;
 function saveFreeCameraState() {
   if (!freeCamera) return;
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     localStorage.setItem(FREE_CAMERA_STORE_KEY, JSON.stringify({
       locked: !!freeCamera.locked,
       active: !!freeCamera.active,
@@ -4201,7 +4201,7 @@ function resetFreeCameraToDefault() {
   freeCamera.locked = true;
   freeCamera.keys = {};
   if (freeCamera.velocity) freeCamera.velocity.set(0, 0, 0);
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1'); if (document.pointerLockElement === renderer.domElement) document.exitPointerLock(); } catch (e) {}
+  try { if (document.pointerLockElement === renderer.domElement) document.exitPointerLock(); } catch (e) {}
   updateFreeCameraHint();
   showToast('自由镜头正在平滑回正');
 }
@@ -4212,7 +4212,7 @@ function toggleFreeCamera() {
     freeCamera.locked = true;
     freeCamera.keys = {};
     if (freeCamera.velocity) freeCamera.velocity.set(0, 0, 0);
-    try { localStorage.setItem('mineradio-diy-player-mode-v1','1'); if (document.pointerLockElement === renderer.domElement) document.exitPointerLock(); } catch (e) {}
+    try { if (document.pointerLockElement === renderer.domElement) document.exitPointerLock(); } catch (e) {}
     saveFreeCameraState();
     updateFreeCameraHint();
     showToast('自由镜头已固定');
@@ -4225,12 +4225,12 @@ function toggleFreeCamera() {
   freeCamera.keys = {};
   freeCameraPointer.seen = false;
   if (!freeCamera.velocity) freeCamera.velocity = new THREE.Vector3();
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1'); renderer.domElement.focus && renderer.domElement.focus({ preventScroll: true }); } catch (e) {
-    try { localStorage.setItem('mineradio-diy-player-mode-v1','1'); renderer.domElement.focus && renderer.domElement.focus(); } catch (ignore) {}
+  try { renderer.domElement.focus && renderer.domElement.focus({ preventScroll: true }); } catch (e) {
+    try { renderer.domElement.focus && renderer.domElement.focus(); } catch (ignore) {}
   }
   saveFreeCameraState();
   updateFreeCameraHint();
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     var lockResult = renderer.domElement.requestPointerLock && renderer.domElement.requestPointerLock();
     if (lockResult && lockResult.catch) lockResult.catch(function(){ freeCameraPointer.seen = false; });
   } catch (e) {
@@ -4291,8 +4291,8 @@ function updateFreeCamera(dt) {
   scheduleFreeCameraStateSave(720);
 }
 function flushPersistentVisualState() {
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1'); saveLyricLayout(); } catch (e) {}
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1'); saveFreeCameraState(); } catch (e) {}
+  try { saveLyricLayout(); } catch (e) {}
+  try { saveFreeCameraState(); } catch (e) {}
 }
 window.addEventListener('beforeunload', flushPersistentVisualState);
 window.addEventListener('pagehide', flushPersistentVisualState);
@@ -5494,7 +5494,7 @@ function setControlsHidden(hidden) {
 
 function isBottomControlsSuppressedForShelf() {
   var shelfContentOpen = false;
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     shelfContentOpen = !!(typeof shelfManager !== 'undefined' && shelfManager && shelfManager.hasOpenContent && shelfManager.hasOpenContent());
   } catch (e) {}
   return !!(shelfPinnedOpen || shelfContentOpen || (controlsShelfSuppressUntil && performance.now() < controlsShelfSuppressUntil));
@@ -5555,7 +5555,7 @@ function wakeBottomHandle(duration) {
 
 function forcePlaybackControlsInteractive() {
   if (!hasActivePlaybackControls()) return;
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     document.body.classList.remove('home-controls-locked');
     var bar = document.getElementById('bottom-bar');
     if (bar) {
@@ -7756,7 +7756,7 @@ function coverTextureSizeForResolution(v) {
   return 256;
 }
 function readSavedLyricLayout() {
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     var savedLayoutRaw = localStorage.getItem(LYRIC_LAYOUT_STORE_KEY);
     var raw = savedLayoutRaw ? (JSON.parse(savedLayoutRaw) || {}) : packagedDefaultLyricLayoutRaw();
     var savedPreset = clampRange(Number(raw.preset) || 0, 0, 6);
@@ -7862,7 +7862,7 @@ function readSavedLyricLayout() {
   }
 }
 function saveLyricLayout() {
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     var presetForSave = startupVisualPreviewActive && !playing && currentIdx < 0
       ? playbackVisualPreset
       : clampRange(Number(fx.preset) || 0, 0, presetMeta.length - 1);
@@ -7954,7 +7954,7 @@ function saveLyricLayout() {
 // --- 播放队列持久化 ---
 var QUEUE_STORE_KEY = 'mineradio-queue-state-v1';
 function saveQueueState() {
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     if (!playQueue.length) { localStorage.removeItem(QUEUE_STORE_KEY); return; }
     localStorage.setItem(QUEUE_STORE_KEY, JSON.stringify({
       queue: playQueue.map(function(s) { return Object.assign({}, s); }),
@@ -7963,7 +7963,7 @@ function saveQueueState() {
   } catch(e) {}
 }
 function restoreQueueState() {
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     var raw = localStorage.getItem(QUEUE_STORE_KEY);
     if (!raw) return false;
     var state = JSON.parse(raw);
@@ -8636,7 +8636,7 @@ function lyricTextPaletteFromHsl(hsl, avgL, chroma) {
 }
 function updateLyricPaletteFromCover(coverCanvas) {
   if (!coverCanvas) return;
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     var ctx = coverCanvas.getContext('2d');
     var img = ctx.getImageData(0, 0, coverCanvas.width, coverCanvas.height).data;
     var w = coverCanvas.width, h = coverCanvas.height;
@@ -8690,7 +8690,7 @@ function wrapLyricText(ctx, text, maxWidth, maxLines, fontSize) {
 function cssColorToThreeColor(css, fallback) {
   var c = new THREE.Color(fallback || '#d6f8ff');
   var value = String(css || fallback || '#d6f8ff').trim();
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     if (/^#[0-9a-f]{3}$/i.test(value) || /^#[0-9a-f]{6}$/i.test(value)) {
       c.set(normalizeHexColor(value));
       return c;
@@ -8706,7 +8706,7 @@ function cssColorToThreeColor(css, fallback) {
     }
     c.setStyle(value);
   } catch (e) {
-    try { localStorage.setItem('mineradio-diy-player-mode-v1','1'); c.set(normalizeHexColor(fallback || '#d6f8ff')); } catch (e2) {}
+    try { c.set(normalizeHexColor(fallback || '#d6f8ff')); } catch (e2) {}
   }
   return c;
 }
@@ -9802,7 +9802,7 @@ async function ensureAIDepthPipeline() {
   if (aiDepthReady && aiDepthPipeline) return aiDepthPipeline;
   if (aiDepthBusy) return null;
   aiDepthBusy = true;
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     showAIDepthChip('加载 AI 深度模型 (首次需下载 50MB)…');
     var mod = await import('https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2');
     mod.env.allowLocalModels = false;
@@ -9824,7 +9824,7 @@ function makeAIDepthInputCanvas(srcCanvas) {
   var cv = document.createElement('canvas');
   cv.width = cv.height = size;
   var ctx = cv.getContext('2d');
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     ctx.drawImage(srcCanvas, 0, 0, size, size);
     return cv;
   } catch (e) {
@@ -9836,13 +9836,13 @@ async function estimateAIDepth(srcCanvas, token) {
   if (!fx.aiDepth) return null;
   if (performance.now() < aiDepthFailUntil) return null;
   showAIDepthChip('后台增强封面深度…');
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     var pipe = await ensureAIDepthPipeline();
     if (!pipe) { hideAIDepthChip(); return null; }
     if (token !== coverProcessToken) { hideAIDepthChip(); return null; }
     var inputCanvas = makeAIDepthInputCanvas(srcCanvas);
     var input = inputCanvas;
-    try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+    try {
       if (inputCanvas && inputCanvas.toDataURL) input = inputCanvas.toDataURL('image/jpeg', 0.82);
     } catch (e) {
       input = inputCanvas;
@@ -10145,7 +10145,7 @@ function applyCoverCanvas(cv, thumbSrc, opts) {
     var prevCv = document.createElement('canvas');
     prevCv.width = Math.max(1, Math.round(prevW * prevScale));
     prevCv.height = Math.max(1, Math.round(prevH * prevScale));
-    try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+    try {
       prevCv.getContext('2d').drawImage(coverTex.image, 0, 0, prevCv.width, prevCv.height);
       prevCoverTex.image = prevCv;
       prevCoverTex.needsUpdate = true;
@@ -10165,7 +10165,7 @@ function applyCoverCanvas(cv, thumbSrc, opts) {
   if (thumbSrc) {
     // On Android, relative /api/ URLs must be resolved to the local server
     var _resolved = thumbSrc;
-    try { localStorage.setItem('mineradio-diy-player-mode-v1','1'); if (typeof desktopWindow !== 'undefined' && desktopWindow && desktopWindow.isMobile && thumbSrc.indexOf('/api/') === 0) _resolved = 'http://127.0.0.1:3000' + thumbSrc; } catch(e) {}
+    try { if (typeof desktopWindow !== 'undefined' && desktopWindow && desktopWindow.isMobile && thumbSrc.indexOf('/api/') === 0) _resolved = 'http://127.0.0.1:3000' + thumbSrc; } catch(e) {}
     document.getElementById('thumb-cover').src = _resolved;
     setControlCoverSrc(_resolved);
   }
@@ -10343,7 +10343,7 @@ function getMusicTempoWorkerUrl() {
 
 async function analyzeMusicTempoInWorker(buffer, token) {
   if (typeof Worker === 'undefined' || typeof Blob === 'undefined' || typeof URL === 'undefined') return null;
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     showBeatChip('后台锁定电影主拍…');
     await yieldToIdle(isHiddenForBackgroundOptimization() ? 20 : 180);
     if (token !== beatMapToken) return null;
@@ -10486,7 +10486,7 @@ function updateBeatDiskCacheStatus(data) {
 
 async function ensureBeatDiskCacheStatus() {
   if (beatDiskCacheStatus.checked) return beatDiskCacheStatus;
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     updateBeatDiskCacheStatus(await apiJson('/api/beatmap/cache/status?t=' + Date.now()));
   } catch (e) {
     updateBeatDiskCacheStatus({ enabled:false, mode:'memory-only', reason:'STATUS_FAILED' });
@@ -10498,7 +10498,7 @@ async function readBeatDiskCache(key) {
   if (!key || beatMapCache[key]) return beatMapCache[key] || null;
   var st = await ensureBeatDiskCacheStatus();
   if (!st.enabled) return null;
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     var r = await apiJson('/api/beatmap/cache?key=' + encodeURIComponent(key) + '&t=' + Date.now());
     if (r && r.enabled === false) updateBeatDiskCacheStatus(r);
     if (!r || !r.hit || !r.map) return null;
@@ -10516,7 +10516,7 @@ async function writeBeatDiskCache(key, map, song, mode) {
   if (!key || !map) return false;
   var st = await ensureBeatDiskCacheStatus();
   if (!st.enabled) return false;
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     var packed = packLocalBeatMap(map);
     if (!packed) return false;
     var r = await apiJson('/api/beatmap/cache', {
@@ -10629,7 +10629,7 @@ async function runQueueBeatPrefetch(fromIdx, token, seq, state) {
   state.count++;
   beatPrefetchBusy = true;
   beatPrefetchLastKey = key;
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     if (token !== beatMapToken || seq !== beatPrefetchToken) return;
     var diskMap = await readBeatDiskCache(key);
     if (diskMap) {
@@ -10669,7 +10669,7 @@ async function analyzeAudioBeats(audioUrl, durationSec, token, options) {
   options = options || {};
   var analysisProfile = cinemaAnalysisProfileForSong(options.song);
   var softGrooveAnalysis = !!(analysisProfile && analysisProfile.softGroove);
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     beatMapBusy = true;
     if (options.prefetch) showBeatChip('预热下一首节奏…');
     else if (options.background) showBeatChip('后台缓冲节奏…');
@@ -10680,7 +10680,7 @@ async function analyzeAudioBeats(audioUrl, durationSec, token, options) {
     var beatAc = new AbortController();
     var beatFetchTimer = setTimeout(function() { beatAc.abort(); }, 25000);
     var resp;
-    try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+    try {
       resp = await fetch(audioUrl, { signal: beatAc.signal });
     } catch (fetchErr) {
       clearTimeout(beatFetchTimer);
@@ -11852,7 +11852,7 @@ async function buildPodcastDjLowOnlyBeatMap(buffer, token) {
 }
 
 async function analyzePodcastDjBeats(audioUrl, token, durationSec) {
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     djBeatMapBusy = true;
     showBeatChip('DJ 离线锁拍…');
     await yieldToIdle(520);
@@ -12356,15 +12356,15 @@ function unpackLocalBeatMap(stored) {
   };
 }
 function readLocalBeatPrefs() {
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1'); return JSON.parse(localStorage.getItem(LOCAL_BEAT_PREF_STORE_KEY) || '{}') || {}; }
+  try { return JSON.parse(localStorage.getItem(LOCAL_BEAT_PREF_STORE_KEY) || '{}') || {}; }
   catch (e) { return {}; }
 }
 function saveLocalBeatPrefs() {
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1'); localStorage.setItem(LOCAL_BEAT_PREF_STORE_KEY, JSON.stringify(localBeatMapPrefs || {})); } catch (e) {}
+  try { localStorage.setItem(LOCAL_BEAT_PREF_STORE_KEY, JSON.stringify(localBeatMapPrefs || {})); } catch (e) {}
 }
 function readLocalBeatMapCache() {
   var out = {};
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     var raw = JSON.parse(localStorage.getItem(LOCAL_BEATMAP_STORE_KEY) || '{}') || {};
     Object.keys(raw).forEach(function(key){
       var entry = raw[key] || {};
@@ -12394,7 +12394,7 @@ function packLocalBeatCache(maxEntries) {
 function saveLocalBeatMapCache() {
   var attempts = [12, 8, 5, 3];
   for (var i = 0; i < attempts.length; i++) {
-    try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+    try {
       localStorage.setItem(LOCAL_BEATMAP_STORE_KEY, JSON.stringify(packLocalBeatCache(attempts[i])));
       return true;
     } catch (e) {}
@@ -12573,7 +12573,7 @@ async function startLocalBeatAnalysis(mode) {
   var localToken = localBeatAnalysis.token;
   updateLocalBeatModal();
   setLocalBeatStatus((mode === 'dj' ? 'DJ' : 'MR') + ' 分析准备中...', 'warn');
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     var map = null;
     if (mode === 'dj') {
       setDjModeActive(true, song);
@@ -12834,7 +12834,7 @@ function makeSquareCoverCanvas(img, size, crop) {
 }
 
 function coverCanvasToDataUrl(cv) {
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     var webp = cv.toDataURL('image/webp', 0.88);
     if (/^data:image\/webp/i.test(webp)) return webp;
   } catch (e) {}
@@ -12894,7 +12894,7 @@ function bindCoverCropModal() {
     coverCropState.lastY = e.clientY;
     stage.classList.add('dragging');
     if (stage.setPointerCapture) {
-      try { localStorage.setItem('mineradio-diy-player-mode-v1','1'); stage.setPointerCapture(e.pointerId); } catch (err) {}
+      try { stage.setPointerCapture(e.pointerId); } catch (err) {}
     }
   });
   stage.addEventListener('pointermove', function(e) {
@@ -13504,7 +13504,7 @@ function makeShelfManager() {
 
   function warmTextureUpload(tex) {
     if (!tex || !renderer || typeof renderer.initTexture !== 'function') return;
-    try { localStorage.setItem('mineradio-diy-player-mode-v1','1'); renderer.initTexture(tex); } catch (e) {}
+    try { renderer.initTexture(tex); } catch (e) {}
   }
 
   function cancelCardBuildQueue() {
@@ -14139,7 +14139,7 @@ void main(){ vec4 t = texture2D(uDotTex, gl_PointCoord); if (t.a < 0.02) discard
 shelfManager = makeShelfManager();
 function safeShelfRebuild(reason, asyncCards) {
   if (!shelfManager || typeof shelfManager.rebuild !== 'function') return false;
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     shelfManager.rebuild(asyncCards);
     return true;
   } catch (e) {
@@ -14164,7 +14164,7 @@ function scheduleShelfRebuild(reason, asyncCards) {
 }
 function safeShelfCloseContent(reason) {
   if (!shelfManager || typeof shelfManager.closeContent !== 'function') return false;
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     shelfManager.closeContent();
     return true;
   } catch (e) {
@@ -14183,7 +14183,7 @@ function safeRenderQueuePanel(reason, opts) {
     queuePanelDirty = true;
     return true;
   }
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     renderQueuePanel(opts);
     queuePanelDirty = false;
     return true;
@@ -14197,7 +14197,7 @@ function flushDeferredQueuePanel(reason) {
   safeRenderQueuePanel(reason || 'flush-deferred-queue', { animate: false, scrollCurrent: miniQueueOpen, deferWhenHidden: false });
 }
 function safeSwitchPlaylistTab(tab, reason) {
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     switchPlaylistTab(tab);
     return true;
   } catch (e) {
@@ -14689,7 +14689,7 @@ function makeContentListManager() {
       } else {
         group.userData.detailIntro = 0;
       }
-      try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+      try {
         drawPanelIfNeeded(true);
         // 清旧
         disposeRows();
@@ -14706,7 +14706,7 @@ function makeContentListManager() {
       contentKind = podcastCollectionKey ? 'podcast' : 'playlist';
       // 拉取歌单/播客集合
       var r = null;
-      try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+      try {
         r = podcastCollectionKey
           ? await apiJson('/api/podcast/my/items?key=' + encodeURIComponent(podcastCollectionKey) + '&limit=36')
           : (qqPlaylistId
@@ -14715,7 +14715,7 @@ function makeContentListManager() {
       } catch (e) {
         if (!open || token !== requestToken) return;
         console.warn('[ShelfContentLoadApi]', playlistId, e);
-        try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+        try {
           allTracks = [{ name: '歌单加载失败', artist: '' }];
           panelDirty = true;
           rowsDirty = true;
@@ -14728,7 +14728,7 @@ function makeContentListManager() {
         return;
       }
       if (!open || token !== requestToken) return;
-      try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+      try {
         // 清 loading
         disposeRows();
         var tracks = podcastCollectionKey ? (r.items || []) : (r.tracks || []);
@@ -15383,7 +15383,7 @@ async function apiJson(url, opts) {
     fetchOpts.signal = controller.signal;
     timer = setTimeout(function(){ controller.abort(); }, timeoutMs);
   }
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     var res = await fetch(url, fetchOpts);
     return res.json();
   } finally {
@@ -15443,14 +15443,14 @@ function playbackResolvedQualityText(data) {
   return br ? (label + ' · ' + br) : label;
 }
 function readPlaybackQualityPreference() {
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     return normalizePlaybackQuality(localStorage.getItem(PLAYBACK_QUALITY_STORE_KEY) || 'hires');
   } catch (e) {
     return 'hires';
   }
 }
 function savePlaybackQualityPreference() {
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1'); localStorage.setItem(PLAYBACK_QUALITY_STORE_KEY, playbackQuality); } catch (e) {}
+  try { localStorage.setItem(PLAYBACK_QUALITY_STORE_KEY, playbackQuality); } catch (e) {}
 }
 function updatePlaybackQualityUi() {
   var label = document.getElementById('quality-btn-label');
@@ -15532,7 +15532,7 @@ function isTypingTarget(target) {
   return !!(target.isContentEditable || (target.closest && target.closest('[contenteditable="true"]')));
 }
 function readCustomCoverMap() {
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     var raw = localStorage.getItem(CUSTOM_COVER_STORE_KEY);
     var parsed = raw ? JSON.parse(raw) : {};
     return parsed && typeof parsed === 'object' ? parsed : {};
@@ -15541,7 +15541,7 @@ function readCustomCoverMap() {
   }
 }
 function saveCustomCoverMap() {
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     localStorage.setItem(CUSTOM_COVER_STORE_KEY, JSON.stringify(customCoverMap || {}));
     return true;
   } catch (e) {
@@ -15618,7 +15618,7 @@ function compactHomeCount(n) {
   return n ? String(n) : '';
 }
 function loadListenStatsState() {
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     var raw = localStorage.getItem(HOME_LISTEN_STATS_KEY);
     if (!raw) return { history: [], songs: {}, artists: {}, updatedAt: 0 };
     var data = JSON.parse(raw);
@@ -15633,7 +15633,7 @@ function loadListenStatsState() {
   }
 }
 function saveListenStatsState() {
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     listenStatsState.updatedAt = Date.now();
     localStorage.setItem(HOME_LISTEN_STATS_KEY, JSON.stringify(listenStatsState));
   } catch (e) {}
@@ -15941,7 +15941,7 @@ async function loadHomeDiscover(force) {
   homeDiscoverState.loading = true;
   homeDiscoverState.error = '';
   renderHomeDiscover();
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     var data = await apiJson('/api/discover/home?t=' + Date.now());
     if (token !== homeDiscoverToken) return;
     homeDiscoverState.loggedIn = !!(data && data.loggedIn);
@@ -15987,7 +15987,7 @@ async function loadHomeWeatherRadio(force, opts) {
   homeWeatherRadioState.error = '';
   renderHomeDiscover();
   var loadPromise = (async function(){
-    try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+    try {
       var data = await apiJson(homeWeatherRadioUrl(opts), { timeoutMs: 14000 });
       if (token !== homeWeatherToken) return homeWeatherRadioState;
       homeWeatherRadioState.weather = data && data.weather || null;
@@ -16013,7 +16013,7 @@ async function loadHomeWeatherRadio(force, opts) {
     return homeWeatherRadioState;
   })();
   homeWeatherLoadPromise = loadPromise;
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     return await loadPromise;
   } finally {
     if (homeWeatherLoadPromise === loadPromise) homeWeatherLoadPromise = null;
@@ -16044,7 +16044,7 @@ async function startWeatherRadio(opts) {
   opts = opts || {};
   if (weatherRadioStartBusy) return;
   weatherRadioStartBusy = true;
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
   if (!homeWeatherRadioState.loaded || !(homeWeatherRadioState.radio && homeWeatherRadioState.radio.songs && homeWeatherRadioState.radio.songs.length)) {
     showToast('正在生成天气电台');
     await loadHomeWeatherRadio(true);
@@ -16069,7 +16069,7 @@ async function startWeatherRadio(opts) {
   safeRenderQueuePanel('weather-radio-start');
   safeShelfRebuild('weather-radio-start', true);
   forcePlaybackControlsInteractive();
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     await playQueueAt(0, { context: activeRadioContext });
   } catch (e) {
     console.warn('[WeatherRadioStartPlay]', e);
@@ -16688,7 +16688,7 @@ function currentQQArtistMid(song) {
 function commentTimeLabel(ms) {
   var t = Number(ms) || 0;
   if (!t) return '';
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     return new Date(t).toLocaleDateString('zh-CN', { month:'short', day:'numeric' });
   } catch (e) {
     return '';
@@ -16976,7 +16976,7 @@ function clearCustomCoverForCurrent() {
   showToast('已恢复默认封面');
 }
 function readCustomLyricMap() {
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     var raw = JSON.parse(localStorage.getItem(CUSTOM_LYRIC_STORE_KEY) || '{}') || {};
     var out = {};
     Object.keys(raw).forEach(function(key){
@@ -16990,7 +16990,7 @@ function readCustomLyricMap() {
   }
 }
 function saveCustomLyricMap() {
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     localStorage.setItem(CUSTOM_LYRIC_STORE_KEY, JSON.stringify(customLyricMap || {}));
     return true;
   } catch (e) {
@@ -16999,11 +16999,11 @@ function saveCustomLyricMap() {
   }
 }
 function readCustomLyricPrefs() {
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1'); return JSON.parse(localStorage.getItem(CUSTOM_LYRIC_PREF_STORE_KEY) || '{}') || {}; }
+  try { return JSON.parse(localStorage.getItem(CUSTOM_LYRIC_PREF_STORE_KEY) || '{}') || {}; }
   catch (e) { return {}; }
 }
 function saveCustomLyricPrefs() {
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1'); localStorage.setItem(CUSTOM_LYRIC_PREF_STORE_KEY, JSON.stringify(customLyricPrefs || {})); } catch (e) {}
+  try { localStorage.setItem(CUSTOM_LYRIC_PREF_STORE_KEY, JSON.stringify(customLyricPrefs || {})); } catch (e) {}
 }
 function songCustomLyricKey(song) {
   return songCustomCoverKey(song);
@@ -17352,7 +17352,7 @@ async function toggleLikeSong(song) {
   updateLikeButtons(song);
   safeRenderQueuePanel('like-toggle-optimistic', { scrollCurrent: miniQueueOpen });
   refreshSearchResultActionStates();
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     var r = await apiJson('/api/song/like?id=' + encodeURIComponent(id) + '&like=' + encodeURIComponent(String(next)));
     if (r && r.error) throw new Error(r.error);
     likedSongMap[id] = next;
@@ -17451,7 +17451,7 @@ async function createPlaylistFromCollect() {
     return;
   }
   if (!ensureLoggedInForAction()) return;
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     var r = await apiJson('/api/playlist/create?name=' + encodeURIComponent(name));
     if (r && r.error) throw new Error(r.error);
     if (input) input.value = '';
@@ -17479,7 +17479,7 @@ async function verifySongInPlaylist(pid, songId) {
     if (attempt) {
       await new Promise(function(resolve){ setTimeout(resolve, attempt === 1 ? 360 : 820); });
     }
-    try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+    try {
       var detail = await apiJson('/api/playlist/tracks?id=' + encodeURIComponent(pid));
       var tracks = (detail && detail.tracks) || [];
       for (var i = 0; i < tracks.length; i++) {
@@ -17497,7 +17497,7 @@ async function addCollectTargetToPlaylist(pid) {
   setCollectBusyPid(pid, true);
   updateLikeButtons();
   showToast('正在收藏到歌单...');
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     var songId = String(collectTargetSong.id || '');
     var r = await apiJson('/api/playlist/add-song', {
       method: 'POST',
@@ -17564,7 +17564,7 @@ function clearSearchResults() {
   $results.classList.remove('show');
 }
 function readSearchHistory() {
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     var raw = JSON.parse(localStorage.getItem(SEARCH_HISTORY_STORE_KEY) || '[]');
     return Array.isArray(raw) ? raw.map(function(v){ return String(v || '').trim(); }).filter(Boolean).slice(0, 10) : [];
   } catch (e) {
@@ -17572,7 +17572,7 @@ function readSearchHistory() {
   }
 }
 function writeSearchHistory(items) {
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1'); localStorage.setItem(SEARCH_HISTORY_STORE_KEY, JSON.stringify((items || []).slice(0, 10))); } catch (e) {}
+  try { localStorage.setItem(SEARCH_HISTORY_STORE_KEY, JSON.stringify((items || []).slice(0, 10))); } catch (e) {}
 }
 function rememberSearchQuery(q) {
   q = String(q || '').trim();
@@ -17716,7 +17716,7 @@ async function loadPodcastHot() {
   var requestSeq = ++searchRequestSeq;
   $results.innerHTML = '<div class="search-empty">Loading podcasts...</div>';
   $results.classList.add('show');
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     var data = await apiJson('/api/podcast/hot?limit=18');
     if (requestSeq !== searchRequestSeq || searchMode !== 'podcast') return;
     renderPodcastRadios(data.podcasts || [], 'Hot podcasts');
@@ -17727,7 +17727,7 @@ async function loadPodcastHot() {
 }
 async function doPodcastSearch(q) {
   var requestSeq = ++searchRequestSeq;
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     var data = await apiJson('/api/podcast/search?keywords=' + encodeURIComponent(q) + '&limit=18');
     if (requestSeq !== searchRequestSeq || searchMode !== 'podcast' || $input.value.trim() !== q) return;
     renderPodcastRadios(data.podcasts || [], 'Search results');
@@ -17741,7 +17741,7 @@ async function openPodcastPrograms(i) {
   podcastCurrentRadio = radio;
   $results.innerHTML = '<div class="search-empty">Loading episodes...</div>';
   $results.classList.add('show');
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     var data = await apiJson('/api/podcast/programs?id=' + encodeURIComponent(radio.id) + '&limit=36');
     if (requestSeq !== searchRequestSeq || searchMode !== 'podcast') return;
     podcastCurrentRadio = Object.assign({}, radio, data.radio || {});
@@ -18072,7 +18072,7 @@ async function doSearch(q, opts) {
     return;
   }
   var requestSeq = ++searchRequestSeq;
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     var mode = searchMode;
     var songs = await fetchMusicSearchResults(q, mode);
     if (requestSeq !== searchRequestSeq || $input.value.trim() !== q) return;
@@ -18194,7 +18194,7 @@ function playShelfSelectTick(direction, variant) {
   clickOsc('triangle', 4200, 0.011, 0.018, 0.18, 0.94);
   clickOsc('square', 7100, 0.018, 0.012, 0.070, 0.98);
   setTimeout(function(){
-    try { localStorage.setItem('mineradio-diy-player-mode-v1','1'); out.disconnect(); } catch (_) {}
+    try { out.disconnect(); } catch (_) {}
   }, 160);
 }
 
@@ -18224,7 +18224,7 @@ function holdAudioOutputGain(now) {
   var current = currentAudioOutputGain();
   if (!gainNode || !audioCtx || !gainNode.gain) return current;
   var param = gainNode.gain;
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     if (typeof param.cancelAndHoldAtTime === 'function') {
       param.cancelAndHoldAtTime(now);
       return currentAudioOutputGain();
@@ -18232,7 +18232,7 @@ function holdAudioOutputGain(now) {
     param.cancelScheduledValues(now);
     param.setValueAtTime(current, now);
   } catch (e) {
-    try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+    try {
       param.cancelScheduledValues(now);
       param.setValueAtTime(current, now);
     } catch (_) {}
@@ -18305,7 +18305,7 @@ function fadeOutAndPauseAudio() {
         resolve(false);
         return;
       }
-      try { localStorage.setItem('mineradio-diy-player-mode-v1','1'); audio.pause(); } catch (pauseErr) { console.warn('[TogglePlayPause]', pauseErr); }
+      try { audio.pause(); } catch (pauseErr) { console.warn('[TogglePlayPause]', pauseErr); }
       setAudioOutputGainImmediate(0);
       resolve(true);
     }, AUDIO_FADE_OUT_MS + 80);
@@ -18346,7 +18346,7 @@ function setVolume(value, silent) {
   var next = Math.max(0, Math.min(1, Number(value) || 0));
   targetVolume = next;
   if (next > 0.01) lastNonZeroVolume = next;
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1'); localStorage.setItem('apex-player-volume', String(next)); } catch (e) {}
+  try { localStorage.setItem('apex-player-volume', String(next)); } catch (e) {}
   applyVolumeToAudio();
   updateVolumeUi();
   if (!silent) showToast('音量 ' + Math.round(next * 100) + '%');
@@ -18669,7 +18669,7 @@ async function tryAutoPlaybackFallback(song, data, idx, token, opts) {
   var fromLabel = playbackProviderLabel(song);
   var targetLabel = alternatePlaybackProvider(song) === 'qq' ? 'QQ 音乐' : '网易云';
   showSourceFallbackNotice('正在自动换源', fromLabel + ' 当前不可播，正在查找 ' + targetLabel + ' 的同名同歌手版本。');
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     var alternate = await searchAlternatePlatformSong(song);
     if (token !== trackSwitchToken) return true;
     if (!alternate) {
@@ -18709,7 +18709,7 @@ function handlePlaybackUnavailable(song, data) {
 function pauseCurrentAudioForTrackSwitch() {
   playToggleBusy = false;
   if (!audio) return;
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     audioFadeSerial++;
     clearAudioFadeTimers();
     audio.onended = null;
@@ -18735,7 +18735,7 @@ function isPlaybackRecursionError(err) {
 }
 
 function safePlaybackStep(label, fn) {
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     return fn();
   } catch (err) {
     console.warn('[PlaybackSetupStep]', label, err);
@@ -18745,7 +18745,9 @@ function safePlaybackStep(label, fn) {
 
 function playbackFailureToastText(err) {
   if (isPlaybackRecursionError(err)) return '播放准备异常，已保持播放器可操作';
-  return '播放失败: ' + (err && err.message ? err.message : err);
+  var msg = (err && err.message ? err.message : String(err || ''));
+  if (err && (err.name === 'AbortError' || /abort/i.test(msg))) return '';
+  return '播放失败: ' + msg;
 }
 function scheduleAudioResumePosition(media, seconds, token) {
   seconds = Math.max(0, Number(seconds) || 0);
@@ -18755,7 +18757,7 @@ function scheduleAudioResumePosition(media, seconds, token) {
     if (applied || token !== trackSwitchToken || !media) return;
     var duration = Number(media.duration) || 0;
     var target = duration > 0 ? Math.min(seconds, Math.max(0, duration - 0.45)) : seconds;
-    try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+    try {
       media.currentTime = target;
       applied = true;
       if (typeof syncBeatMapPlaybackCursor === 'function') syncBeatMapPlaybackCursor(target, true);
@@ -18775,7 +18777,7 @@ async function playQueueAt(idx, opts) {
   markRenderInteraction('track-switch', 1500);
   var playPhase = 'start';
   function markPlayPhase(name) { playPhase = name; }
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
   markPlayPhase('session-finalize');
   safePlaybackStep('session-finalize', function(){ finalizeListenSession(false); });
   homeForcedOpen = false;
@@ -18841,7 +18843,7 @@ async function playQueueAt(idx, opts) {
     });
   }
 
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     markPlayPhase('source-url');
     var isQQPlayback = songProviderKey(song) === 'qq';
     var requestedQuality = normalizePlaybackQuality(opts.qualityOverride || playbackQuality);
@@ -18922,7 +18924,7 @@ async function playQueueAt(idx, opts) {
     scheduleAudioResumePosition(audio, opts.resumeAt, token);
     audio.load();
     markPlayPhase('visual-prep');
-    try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+    try {
     // 重置 beatmap 状态
     currentBeatMap = null;
     beatMapNextIdx = 0;
@@ -19034,7 +19036,8 @@ async function playQueueAt(idx, opts) {
       skipFailedQueueItem(idx, token, '当前歌曲加载失败，正在尝试队列里的下一首。');
       return;
     }
-    showToast(playbackFailureToastText(err));
+    var errToast = playbackFailureToastText(err);
+    if (errToast) showToast(errToast);
   }
   } catch (setupErr) {
     console.error('Play setup failed:', { phase: playPhase, error: setupErr }, setupErr);
@@ -19044,12 +19047,13 @@ async function playQueueAt(idx, opts) {
       skipFailedQueueItem(idx, token, '当前歌曲切换失败，正在尝试队列里的下一首。');
       return;
     }
-    showToast(playbackFailureToastText(setupErr));
+    var setupErrToast = playbackFailureToastText(setupErr);
+    if (setupErrToast) showToast(setupErrToast);
   }
 }
 async function attemptAudioPlay(opts) {
   opts = opts || {};
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
       if (!audio) return false;
       if (!audioReady) initAudio();
       if (opts.fade !== false) preparePlaybackFadeIn();
@@ -19092,7 +19096,7 @@ async function playAudio(opts) {
 async function togglePlay() {
   if (playToggleBusy) return;
   playToggleBusy = true;
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     forcePlaybackControlsInteractive();
     if ((!audio || !audio.src) && playQueue.length && currentIdx >= 0) {
       await playQueueAt(currentIdx, { manual: true });
@@ -19245,7 +19249,7 @@ function applyControlGlassChromaticOffset() {
   });
 }
 function supportsControlGlassSvgFilter() {
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     var ua = navigator.userAgent || '';
     if ((/Safari/.test(ua) && !/Chrome/.test(ua)) || /Firefox/.test(ua)) return false;
     var div = document.createElement('div');
@@ -19285,7 +19289,7 @@ function updateGlassDisplacementMapForElement(el, img, stateKey) {
   controlGlassState[stateKey] = key;
   var href = generateControlGlassDisplacementMap(rect.width, rect.height, radius);
   img.setAttribute('href', href);
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1'); img.setAttributeNS('http://www.w3.org/1999/xlink', 'href', href); } catch (e) {}
+  try { img.setAttributeNS('http://www.w3.org/1999/xlink', 'href', href); } catch (e) {}
 }
 function updateControlGlassDisplacementMap() {
   updateGlassDisplacementMapForElement(
@@ -19324,7 +19328,7 @@ function updateSearchPillGlassDisplacementMap() {
   controlGlassState.searchPillKey = key;
   var href = generateControlGlassDisplacementMap(width, height, radius);
   img.setAttribute('href', href);
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1'); img.setAttributeNS('http://www.w3.org/1999/xlink', 'href', href); } catch (e) {}
+  try { img.setAttributeNS('http://www.w3.org/1999/xlink', 'href', href); } catch (e) {}
 }
 function initControlGlassSurface() {
   if (supportsControlGlassSvgFilter()) document.documentElement.classList.add('control-glass-svg-ok');
@@ -19415,7 +19419,7 @@ function bindPlayerControlAnimations() {
 }
 
 function clearPlayerControlFocusState(reason) {
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     document.querySelectorAll('#bottom-bar .ctrl-btn').forEach(function(btn){
       if (!btn) return;
       if (document.activeElement === btn) btn.blur();
@@ -19442,7 +19446,7 @@ function clearPlayerControlFocusState(reason) {
 //  歌词
 // ============================================================
 async function fetchLyric(songOrId, token) {
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     var song = (songOrId && typeof songOrId === 'object') ? songOrId : null;
     // Use raw source code for routing: wy/tx→netease/qq, kw→kw, kg→kg
     var rawSrc = (song && (song.provider || song.source || '')) ? (song.provider || song.source).toLowerCase() : '';
@@ -19949,7 +19953,7 @@ async function refreshUserPlaylists(force) {
   }
   var $pod = document.getElementById('podcast-list');
   if ($pod) $pod.innerHTML = miniQueueSkeleton();
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     var result = await Promise.all([
       loginStatus.loggedIn ? apiJson('/api/user/playlists') : Promise.resolve({ playlists: [] }),
       loginStatus.loggedIn ? apiJson('/api/podcast/my') : Promise.resolve({ collections: [], loggedIn: false }),
@@ -20014,7 +20018,7 @@ function renderPlaylistPanelDetailState() {
 function scrollPlaylistPanelToTop() {
   var panel = document.getElementById('playlist-panel');
   if (!panel) return;
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1'); panel.scrollTo({ top: 0, behavior: 'smooth' }); }
+  try { panel.scrollTo({ top: 0, behavior: 'smooth' }); }
   catch (e) { panel.scrollTop = 0; }
 }
 function scrollPlaylistPanelDetailIntoView(key) {
@@ -20032,7 +20036,7 @@ function scrollPlaylistPanelDetailIntoView(key) {
     if (!detail) return;
     var anchor = detail.previousElementSibling || detail;
     var top = Math.max(0, anchor.offsetTop - 10);
-    try { localStorage.setItem('mineradio-diy-player-mode-v1','1'); panel.scrollTo({ top: top, behavior: 'smooth' }); }
+    try { panel.scrollTo({ top: top, behavior: 'smooth' }); }
     catch (e) { panel.scrollTop = top; }
   });
 }
@@ -20053,7 +20057,7 @@ async function openPlaylistPanelDetail(provider, pid, title) {
   playlistPanelDetailState = { key: key, loading: true, playlist: pl, tracks: [], token: token, renderLimit: PLAYLIST_DETAIL_INITIAL_RENDER };
   renderPlaylistPanelDetailState();
   scrollPlaylistPanelDetailIntoView(key);
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     var r = provider === 'qq'
       ? await apiJson('/api/qq/playlist/tracks?id=' + encodeURIComponent(pid))
       : await apiJson('/api/playlist/tracks?id=' + encodeURIComponent(pid));
@@ -20292,7 +20296,7 @@ function renderMyPodcastRadioItems(key, title, items) {
 async function openMyPodcastCollection(key, title) {
   if (!key) return;
   showLoading();
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     var r = await apiJson('/api/podcast/my/items?key=' + encodeURIComponent(key) + '&limit=36');
     if (r && r.loggedIn === false) { showLoginModal(); return; }
     var items = r.items || [];
@@ -20324,7 +20328,7 @@ async function openMyPodcastCollection(key, title) {
 async function loadPodcastRadioIntoQueue(id, autoplay, title) {
   if (!id) return;
   showLoading();
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     var r = await apiJson('/api/podcast/programs?id=' + encodeURIComponent(id) + '&limit=36');
     if (r.error) { showToast('播客加载失败: ' + r.error); return; }
     if (!r.programs || !r.programs.length) { showToast('播客暂无可播放节目'); return; }
@@ -20351,7 +20355,7 @@ async function loadPlaylistIntoQueueById(id, autoplay, title) {
   showLoading();
   var qqPlaylistId = String(id || '').indexOf('qq:') === 0 ? String(id).slice(3) : '';
   var r = null;
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     r = qqPlaylistId
       ? await apiJson('/api/qq/playlist/tracks?id=' + encodeURIComponent(qqPlaylistId))
       : await apiJson('/api/playlist/tracks?id=' + encodeURIComponent(id));
@@ -20361,7 +20365,7 @@ async function loadPlaylistIntoQueueById(id, autoplay, title) {
     hideLoading();
     return;
   }
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     if (r.error) { showToast('歌单加载失败: ' + r.error); return; }
     if (!r.tracks || !r.tracks.length) { showToast('歌单为空'); return; }
     playQueue = r.tracks.map(cloneSong);
@@ -20373,7 +20377,7 @@ async function loadPlaylistIntoQueueById(id, autoplay, title) {
     safeShelfRebuild('playlist-load', true);
     forcePlaybackControlsInteractive();
     if (autoplay) {
-      try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+      try {
         await playQueueAt(0);
       } catch (playErr) {
         console.warn('[PlaylistAutoplay]', id, playErr);
@@ -20467,7 +20471,7 @@ progressBar.addEventListener('pointerdown', function(e){
   if (!audio || !audio.duration) return;
   progressDragState.active = true;
   progressBar.classList.add('is-dragging');
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1'); progressBar.setPointerCapture(e.pointerId); } catch (err) {}
+  try { progressBar.setPointerCapture(e.pointerId); } catch (err) {}
   seekFromProgressPointer(e, true);
 });
 progressBar.addEventListener('pointermove', function(e){
@@ -20478,7 +20482,7 @@ function endProgressDrag(e) {
   if (!progressDragState.active) return;
   progressDragState.active = false;
   progressBar.classList.remove('is-dragging');
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1'); progressBar.releasePointerCapture(e.pointerId); } catch (err) {}
+  try { progressBar.releasePointerCapture(e.pointerId); } catch (err) {}
 }
 progressBar.addEventListener('pointerup', endProgressDrag);
 progressBar.addEventListener('pointercancel', endProgressDrag);
@@ -20735,7 +20739,7 @@ function normalizeFxArchiveSnapshot(raw) {
 }
 function readUserFxArchives() {
   var raw = [];
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     raw = JSON.parse(localStorage.getItem(USER_FX_ARCHIVE_STORE_KEY) || '[]') || [];
   } catch (e) {
     raw = [];
@@ -20755,14 +20759,14 @@ function readUserFxArchives() {
   });
 }
 function saveUserFxArchives() {
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     localStorage.setItem(USER_FX_ARCHIVE_STORE_KEY, JSON.stringify(userFxArchives));
   } catch (e) {
     showToast('用户存档保存失败，本地存储空间可能不足');
   }
 }
 function hasStoredUserFxArchives() {
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     return localStorage.getItem(USER_FX_ARCHIVE_STORE_KEY) != null;
   } catch (e) {
     return true;
@@ -21087,7 +21091,7 @@ function normalizeImportedFxArchivePayload(payload, fileName) {
 }
 function importUserFxArchiveText(text, fileName) {
   var payload = null;
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1'); payload = JSON.parse(String(text || '')); } catch (e) {}
+  try { payload = JSON.parse(String(text || '')); } catch (e) {}
   var slot = normalizeImportedFxArchivePayload(payload, fileName);
   if (!slot) {
     showToast('导入失败，文件不是有效的用户存档');
@@ -21397,9 +21401,9 @@ function readBackgroundImageFile(file) {
       var cx = cv.getContext('2d');
       cx.drawImage(img, 0, 0, w, h);
       var out = '';
-      try { localStorage.setItem('mineradio-diy-player-mode-v1','1'); out = cv.toDataURL('image/webp', 0.84); } catch (err) {}
+      try { out = cv.toDataURL('image/webp', 0.84); } catch (err) {}
       if (!/^data:image\/webp/i.test(out)) {
-        try { localStorage.setItem('mineradio-diy-player-mode-v1','1'); out = cv.toDataURL('image/jpeg', 0.86); } catch (err2) { out = String(e.target.result || ''); }
+        try { out = cv.toDataURL('image/jpeg', 0.86); } catch (err2) { out = String(e.target.result || ''); }
       }
       setCustomBackgroundImage(out);
     };
@@ -21548,7 +21552,7 @@ function openCoverColorPicker(target) {
     return;
   }
   var imgSrc = '';
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1'); imgSrc = cv.toDataURL('image/jpeg', 0.84); } catch (e) {}
+  try { imgSrc = cv.toDataURL('image/jpeg', 0.84); } catch (e) {}
   if (!imgSrc && currentCoverSource && currentCoverSource.src) imgSrc = currentCoverSource.src;
   art.style.backgroundImage = imgSrc ? 'url("' + cssImageUrl(imgSrc) + '")' : '';
   setCoverPickerPreview(fx.visualTintColor || (stageLyrics.coverPalette && stageLyrics.coverPalette.primary) || '#9db8cf');
@@ -21580,7 +21584,7 @@ function moveCoverColorLoupe(e) {
   var x = clampRange((e.clientX - rect.left) / Math.max(1, rect.width), 0, 1);
   var y = clampRange((e.clientY - rect.top) / Math.max(1, rect.height), 0, 1);
   var imgSrc = '';
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1'); imgSrc = cv.toDataURL('image/jpeg', 0.84); } catch (err) {}
+  try { imgSrc = cv.toDataURL('image/jpeg', 0.84); } catch (err) {}
   if (imgSrc) {
     loupe.style.backgroundImage = 'url("' + cssImageUrl(imgSrc) + '")';
     loupe.style.backgroundSize = '680% 680%';
@@ -21602,7 +21606,7 @@ function pickCoverColorFromArt(e) {
   var y = clampRange((e.clientY - rect.top) / Math.max(1, rect.height), 0, 1);
   var sx = Math.max(0, Math.min(cv.width - 1, Math.floor(x * cv.width)));
   var sy = Math.max(0, Math.min(cv.height - 1, Math.floor(y * cv.height)));
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     var data = cv.getContext('2d').getImageData(sx, sy, 1, 1).data;
     applyCoverPickerColor(rgbToHexColor(data[0], data[1], data[2]));
   } catch (err) {
@@ -22322,7 +22326,7 @@ function getHotkeyDefaults() {
 }
 function readHotkeySettings() {
   var defaults = getHotkeyDefaults();
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     var raw = JSON.parse(localStorage.getItem(HOTKEY_SETTINGS_STORE_KEY) || '{}') || {};
     return {
       local: Object.assign({}, defaults.local, raw.local || {}),
@@ -22333,7 +22337,7 @@ function readHotkeySettings() {
   }
 }
 function saveHotkeySettings() {
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1'); localStorage.setItem(HOTKEY_SETTINGS_STORE_KEY, JSON.stringify(hotkeySettings || getHotkeyDefaults())); } catch (e) {}
+  try { localStorage.setItem(HOTKEY_SETTINGS_STORE_KEY, JSON.stringify(hotkeySettings || getHotkeyDefaults())); } catch (e) {}
 }
 function hotkeyActionMeta(actionKey) {
   for (var i = 0; i < HOTKEY_ACTIONS.length; i++) {
@@ -23311,7 +23315,7 @@ async function tryLxSourceFallback(song, idx, token, opts) {
   var fromLabel = (playbackProviderLabel(song) || currentSrc).toUpperCase();
   showSourceFallbackNotice('正在自动换源', fromLabel + ' 当前不可播，正在 LX 源中查找。');
   // Parallel search across all alternate sources (lx-music-desktop style)
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     var searchPromises = altSources.map(function(src) {
       return apiJson('/api/lx/search?keywords=' + encodeURIComponent(query) + '&source=' + encodeURIComponent(src) + '&limit=5')
         .then(function(r) { return { src: src, songs: r.songs || [] }; })
@@ -23651,7 +23655,7 @@ function setUpdatePreviewVisible(visible) {
 }
 
 async function checkLatestUpdate() {
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     var data = await apiJson('/api/update/latest?t=' + Date.now());
     applyLatestUpdateInfo(data);
   } catch (e) {
@@ -23856,7 +23860,7 @@ async function startRealUpdateDownload() {
   updatePreviewState.failedAttempts = [];
   updatePreviewState.message = '正在下载完整安装包';
   updateUpdatePreviewProgress(0);
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     var job = await apiJson('/api/update/download', { method: 'POST' });
     if (!job || job.ok === false || !job.id) throw new Error((job && job.error) || 'UPDATE_DOWNLOAD_START_FAILED');
     updatePreviewState.downloadJobId = job.id;
@@ -23901,7 +23905,7 @@ async function startRealUpdatePatch() {
   updatePreviewState.patchFallbackTried = false;
   updatePreviewState.message = '正在下载快速补丁';
   updateUpdatePreviewProgress(0);
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     var job = await apiJson('/api/update/patch', { method: 'POST' });
     if (!job || job.ok === false || !job.id) throw new Error((job && job.error) || 'UPDATE_PATCH_START_FAILED');
     updatePreviewState.patchJobId = job.id;
@@ -23922,7 +23926,7 @@ async function startRealUpdatePatch() {
 
 async function pollUpdateDownloadJob(id) {
   if (!id) return;
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     var job = await apiJson('/api/update/download/status?id=' + encodeURIComponent(id) + '&t=' + Date.now());
     applyUpdateDownloadJob(job);
   } catch (e) {
@@ -23938,7 +23942,7 @@ async function pollUpdateDownloadJob(id) {
 }
 async function pollUpdatePatchJob(id) {
   if (!id) return;
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     var job = await apiJson('/api/update/patch/status?id=' + encodeURIComponent(id) + '&t=' + Date.now());
     applyUpdateDownloadJob(job);
   } catch (e) {
@@ -24016,7 +24020,7 @@ function applyUpdateDownloadJob(job) {
 }
 async function restartForAppliedPatch() {
   if (!updatePreviewState.restartRequired) return;
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     if (window.desktopWindow && typeof window.desktopWindow.restartApp === 'function') {
       await window.desktopWindow.restartApp();
       return;
@@ -24030,7 +24034,7 @@ async function openDownloadedUpdateInstaller(filePath) {
   if (updatePreviewState.installerOpened) return;
   updatePreviewState.status = 'opening';
   syncUpdatePreviewStateClass();
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     if (window.desktopWindow && window.desktopWindow.openUpdateInstaller) {
       var result = await window.desktopWindow.openUpdateInstaller(filePath);
       if (!result || result.ok === false) throw new Error((result && result.error) || 'OPEN_UPDATE_FAILED');
@@ -24263,7 +24267,7 @@ function renderTopAccountPill(provider) {
   '</span>';
 }
 async function refreshLoginStatus(force) {
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     var info = await apiJson('/api/login/status?t=' + Date.now());
     loginStatusChecked = true;
     loginStatusCheckFailed = false;
@@ -24315,7 +24319,7 @@ function normalizeQQLoginStatus(info) {
   });
 }
 async function refreshQQLoginStatus() {
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     var info = await apiJson('/api/qq/login/status?t=' + Date.now());
     var prevLogged = !!qqLoginStatus.loggedIn;
     qqLoginStatus = normalizeQQLoginStatus(info);
@@ -24473,7 +24477,7 @@ async function refreshQr() {
     }
     return;
   }
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     var k = await apiJson('/api/login/qr/key');
     if (!k.key) throw new Error('获取 key 失败');
     qrKey = k.key;
@@ -24509,7 +24513,7 @@ async function openNeteaseWebLogin() {
   neteaseWebLoginBusy = true;
   updateLoginProviderUi();
   if (statusEl) { statusEl.textContent = '已打开网易云窗口，请在官方页面扫码登录…'; statusEl.className = 'preview'; }
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     var result = await api.openNeteaseMusicLogin();
     if (!result || !result.ok || !result.cookie) {
       throw new Error((result && (result.message || result.error)) || '网易云登录未完成');
@@ -24556,7 +24560,7 @@ async function openQQWebLogin() {
   qqWebLoginBusy = true;
   updateLoginProviderUi();
   if (statusEl) { statusEl.textContent = '已打开 QQ 音乐窗口，请扫码并确认登录…'; statusEl.className = 'preview'; }
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     var result = await api.openQQMusicLogin();
     if (!result || !result.ok || !result.cookie) {
       throw new Error((result && (result.message || result.error)) || 'QQ 登录未完成');
@@ -24603,7 +24607,7 @@ async function submitQQCookieLogin() {
   qqCookieBusy = true;
   if (saveBtn) saveBtn.classList.add('busy');
   if (statusEl) { statusEl.textContent = '正在保存 QQ 会话…'; statusEl.className = 'preview'; }
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     var info = await apiJson('/api/qq/login/cookie', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -24630,7 +24634,7 @@ async function submitQQCookieLogin() {
 }
 async function checkQr() {
   if (!qrKey) return;
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     var r = await apiJson('/api/login/qr/check?key=' + encodeURIComponent(qrKey));
     var $st = document.getElementById('qr-status');
     if (r.code === 800) { $st.textContent = '二维码已过期, 请刷新'; $st.className = 'fail'; stopQrPoll(); }
@@ -24745,8 +24749,8 @@ function openProviderLogin(provider) {
 }
 async function logoutActiveAccount() {
   if (activeAccountProvider === 'qq') {
-    try { localStorage.setItem('mineradio-diy-player-mode-v1','1'); await apiJson('/api/qq/logout'); } catch (e) {}
-    try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+    try { await apiJson('/api/qq/logout'); } catch (e) {}
+    try {
       if (window.desktopWindow && typeof window.desktopWindow.clearQQMusicLogin === 'function') {
         await window.desktopWindow.clearQQMusicLogin();
       }
@@ -24766,7 +24770,7 @@ async function logoutActiveAccount() {
 }
 async function doLogout() {
   await apiJson('/api/logout');
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     if (window.desktopWindow && typeof window.desktopWindow.clearNeteaseMusicLogin === 'function') {
       await window.desktopWindow.clearNeteaseMusicLogin();
     }
@@ -25482,10 +25486,10 @@ function activeVisualGuideSteps() {
   return diyPlayerMode ? visualGuideStepsDiy : visualGuideSteps;
 }
 function visualGuideWasSeen() {
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1'); return localStorage.getItem(VISUAL_GUIDE_SEEN_STORE_KEY) === '1'; } catch (e) { return true; }
+  try { return localStorage.getItem(VISUAL_GUIDE_SEEN_STORE_KEY) === '1'; } catch (e) { return true; }
 }
 function markVisualGuideSeen() {
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1'); localStorage.setItem(VISUAL_GUIDE_SEEN_STORE_KEY, '1'); } catch (e) {}
+  try { localStorage.setItem(VISUAL_GUIDE_SEEN_STORE_KEY, '1'); } catch (e) {}
 }
 function maybeRunStartupVisualGuide(source) {
   if (visualGuideWasSeen() || visualGuideActive || immersiveMode || playing) return false;
@@ -25790,7 +25794,7 @@ var HAND_SMOOTH_ALPHA = 0.35;
 async function startGestureControl() {
   if (gestureActive) return;
   showToast('正在加载手势识别…');
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     await loadScriptOnce('https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js');
     await loadScriptOnce('https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js');
     gestureVideo = document.createElement('video');
@@ -25826,9 +25830,9 @@ async function startGestureControl() {
 
 function stopGestureControl() {
   if (!gestureActive) return;
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1'); if (gestureCamera && gestureCamera.stop) gestureCamera.stop(); } catch(e){}
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1'); if (gestureVideo && gestureVideo.srcObject) gestureVideo.srcObject.getTracks().forEach(function(t){ t.stop(); }); } catch(e){}
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1'); if (gestureVideo) gestureVideo.remove(); } catch(e){}
+  try { if (gestureCamera && gestureCamera.stop) gestureCamera.stop(); } catch(e){}
+  try { if (gestureVideo && gestureVideo.srcObject) gestureVideo.srcObject.getTracks().forEach(function(t){ t.stop(); }); } catch(e){}
+  try { if (gestureVideo) gestureVideo.remove(); } catch(e){}
   gestureVideo = null; gestureHands = null; gestureCamera = null;
   gestureActive = false;
   pinchState.active = false;
@@ -26244,10 +26248,10 @@ function setPeek(el, on, key) {
   }
 }
 function uploadTipWasSeen() {
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1'); return localStorage.getItem(UPLOAD_TIP_STORE_KEY) === '1'; } catch (e) { return true; }
+  try { return localStorage.getItem(UPLOAD_TIP_STORE_KEY) === '1'; } catch (e) { return true; }
 }
 function markUploadTipSeen() {
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1'); localStorage.setItem(UPLOAD_TIP_STORE_KEY, '1'); } catch (e) {}
+  try { localStorage.setItem(UPLOAD_TIP_STORE_KEY, '1'); } catch (e) {}
 }
 function closeUploadTip(manual) {
   var tip = document.getElementById('upload-tip');
@@ -26510,7 +26514,7 @@ function splashEaseOutCubic(t) {
 
 function initMineradioSplashWebgl(canvas) {
   var gl = null;
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     gl = canvas.getContext('webgl', {
       alpha: true,
       antialias: false,
@@ -26927,7 +26931,7 @@ function drawMineradioSplash() {
 
 function playMineradioIntroSound() {
   if (splashSoundPlayed) return;
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     var AudioContextCtor = window.AudioContext || window.webkitAudioContext;
     if (!AudioContextCtor) return;
     var ctx = splashAudioCtx || new AudioContextCtor();
@@ -27085,6 +27089,7 @@ document.addEventListener('DOMContentLoaded', function(){
     if (splashReadyToEnter) dismissSplash();
   }
   s.addEventListener('click', requestSplashEnter);
+  s.addEventListener('touchend', requestSplashEnter);
   document.addEventListener('keydown', function(e){
     if (!document.body.classList.contains('splash-active')) return;
     if (e.key === 'Enter' || e.code === 'Space') {
@@ -27225,7 +27230,7 @@ function desktopLyricsBeatMapPayload(force) {
   return payload;
 }
 function notifyDesktopLyricsBeatMapReady() {
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     if (fx && fx.desktopLyrics) pushDesktopLyricsState(true);
   } catch (e) {}
 }
@@ -27471,7 +27476,7 @@ scheduleUiWarmTask(function(){
   updateControlGlassDisplacementMap();
   updateSearchBoxGlassDisplacementMap();
   updateSearchPillGlassDisplacementMap();
-  try { localStorage.setItem('mineradio-diy-player-mode-v1','1');
+  try {
     if (renderer && renderer.compile && scene && camera) renderer.compile(scene, camera);
   } catch (e) {}
 }, 900);

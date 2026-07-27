@@ -35,6 +35,7 @@ android {
         }
     }
     packagingOptions {
+        jniLibs.useLegacyPackaging true
         pickFirst 'lib/armeabi-v7a/libnode.so'
         pickFirst 'lib/arm64-v8a/libnode.so'
         pickFirst 'lib/x86/libnode.so'

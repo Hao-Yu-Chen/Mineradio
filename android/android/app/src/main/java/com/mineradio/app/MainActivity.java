@@ -1,7 +1,12 @@
 package com.mineradio.app;
 
+import android.os.Build;
 import android.os.Bundle;
 import android.util.Log;
+import android.view.View;
+import android.view.WindowInsets;
+import android.view.WindowInsetsController;
+import android.view.WindowManager;
 import android.widget.Toast;
 import com.getcapacitor.BridgeActivity;
 
@@ -9,13 +14,60 @@ public class MainActivity extends BridgeActivity {
 
     private static final String T = "MINERADIO";
 
+    private void enableFullScreen() {
+        // Edge-to-edge: draw behind system bars
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            getWindow().setDecorFitsSystemWindows(false);
+            WindowInsetsController ctrl = getWindow().getInsetsController();
+            if (ctrl != null) {
+                ctrl.hide(WindowInsets.Type.statusBars() | WindowInsets.Type.navigationBars());
+                ctrl.setSystemBarsBehavior(
+                    WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+            }
+        } else {
+            getWindow().getDecorView().setSystemUiVisibility(
+                View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                | View.SYSTEM_UI_FLAG_FULLSCREEN
+                | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+            );
+        }
+
+        // Fill under-display camera cutout area
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            WindowManager.LayoutParams lp = getWindow().getAttributes();
+            lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+            getWindow().setAttributes(lp);
+        }
+
+        // Transparent system bars
+        getWindow().setStatusBarColor(android.graphics.Color.TRANSPARENT);
+        getWindow().setNavigationBarColor(android.graphics.Color.TRANSPARENT);
+    }
+
     @Override
     public void onCreate(Bundle savedInstanceState) {
+        // Global crash catcher
+        final Thread.UncaughtExceptionHandler oldHandler = Thread.getDefaultUncaughtExceptionHandler();
+        Thread.setDefaultUncaughtExceptionHandler((t, e) -> {
+            final String msg = "CRASH: " + e.getClass().getSimpleName() + "\n" +
+                (e.getMessage() != null ? e.getMessage() : "(no message)");
+            Log.e(T, msg, e);
+            try {
+                runOnUiThread(() -> Toast.makeText(getApplicationContext(), msg, Toast.LENGTH_LONG).show());
+                Thread.sleep(3000);
+            } catch (InterruptedException ignored3) {}
+            if (oldHandler != null) oldHandler.uncaughtException(t, e);
+        });
+
         super.onCreate(savedInstanceState);
         Log.i(T, "App started");
 
+        enableFullScreen();
+
         new Thread(() -> {
-            // Step 1: Load native libs
             try {
                 step("Loading native libs...");
                 try { System.loadLibrary("nodejs-mobile-cordova-native-lib"); step("bridge OK"); }
@@ -23,7 +75,6 @@ public class MainActivity extends BridgeActivity {
                 try { System.loadLibrary("node"); step("node OK"); }
                 catch (Throwable t) { step("FAIL node: "+t); return; }
 
-                // Step 2: Create instance and init
                 step("Init NodeJS...");
                 new com.janeasystems.cdvnodejsmobile.NodeJS();
                 com.janeasystems.cdvnodejsmobile.NodeJS.setListener(new com.janeasystems.cdvnodejsmobile.NodeJS.NodeJSListener() {
@@ -34,10 +85,9 @@ public class MainActivity extends BridgeActivity {
                 com.janeasystems.cdvnodejsmobile.NodeJS.init(getApplicationContext());
                 step("init done");
 
-                // Step 3: Start engine
                 step("Starting server...");
                 com.janeasystems.cdvnodejsmobile.NodeJS.startEngine("nodejs-project/server.js");
-                step("startEngine done — loading.html polls for readiness");
+                step("startEngine done");
 
             } catch (Throwable t) {
                 step("FATAL: " + t.getClass().getSimpleName() + " " + t.getMessage());
@@ -46,9 +96,14 @@ public class MainActivity extends BridgeActivity {
         }, "NodeJS").start();
     }
 
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) enableFullScreen();
+    }
+
     private void step(final String msg) {
         Log.i(T, msg);
-        // Only show Toast for errors — success messages are logged but not displayed
         if (msg.contains("FAIL") || msg.contains("err") || msg.contains("FATAL")) {
             try {
                 runOnUiThread(() -> Toast.makeText(getApplicationContext(), msg, Toast.LENGTH_LONG).show());

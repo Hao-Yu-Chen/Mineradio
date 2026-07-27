@@ -78,7 +78,7 @@ if [ -f "www/index.html" ]; then
     # 1. Change preload CSS class to DIY mode
     sed -i "s/'simple-mode-preload'/'diy-mode-preload'/g" www/index.html
     # 2. Also set localStorage in preload so main script reads DIY mode correctly
-    sed -i "s|try {|try { localStorage.setItem('mineradio-diy-player-mode-v1','1');|" www/index.html
+    sed -i "0,/try {/s|try {|try { localStorage.setItem('mineradio-diy-player-mode-v1','1');|" www/index.html
     # 3. Inject mobile bridge
     if ! grep -q "mobile-bridge.js" www/index.html; then
         sed -i 's|</body>|<script src="mobile-bridge.js"></script>\n</body>|' www/index.html

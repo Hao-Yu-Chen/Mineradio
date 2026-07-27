@@ -18745,7 +18745,9 @@ function safePlaybackStep(label, fn) {
 
 function playbackFailureToastText(err) {
   if (isPlaybackRecursionError(err)) return '播放准备异常，已保持播放器可操作';
-  return '播放失败: ' + (err && err.message ? err.message : err);
+  var msg = (err && err.message ? err.message : String(err || ''));
+  if (err && (err.name === 'AbortError' || /abort/i.test(msg))) return '';
+  return '播放失败: ' + msg;
 }
 function scheduleAudioResumePosition(media, seconds, token) {
   seconds = Math.max(0, Number(seconds) || 0);
@@ -19034,7 +19036,8 @@ async function playQueueAt(idx, opts) {
       skipFailedQueueItem(idx, token, '当前歌曲加载失败，正在尝试队列里的下一首。');
       return;
     }
-    showToast(playbackFailureToastText(err));
+    var errToast = playbackFailureToastText(err);
+    if (errToast) showToast(errToast);
   }
   } catch (setupErr) {
     console.error('Play setup failed:', { phase: playPhase, error: setupErr }, setupErr);
@@ -19044,7 +19047,8 @@ async function playQueueAt(idx, opts) {
       skipFailedQueueItem(idx, token, '当前歌曲切换失败，正在尝试队列里的下一首。');
       return;
     }
-    showToast(playbackFailureToastText(setupErr));
+    var setupErrToast = playbackFailureToastText(setupErr);
+    if (setupErrToast) showToast(setupErrToast);
   }
 }
 async function attemptAudioPlay(opts) {
@@ -27085,6 +27089,7 @@ document.addEventListener('DOMContentLoaded', function(){
     if (splashReadyToEnter) dismissSplash();
   }
   s.addEventListener('click', requestSplashEnter);
+  s.addEventListener('touchend', requestSplashEnter);
   document.addEventListener('keydown', function(e){
     if (!document.body.classList.contains('splash-active')) return;
     if (e.key === 'Enter' || e.code === 'Space') {

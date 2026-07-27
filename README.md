@@ -18,8 +18,17 @@ npm start
 # 构建 Windows NSIS 安装包 → dist/
 npm run build:win
 
-# 构建 Android APK → android/Mineradio-debug.apk
+# ── Android APK 构建 ──
+# Windows（推荐）
+cd android
+build-apk.bat
+# 输出：android/Mineradio-debug.apk
+
+# Linux / macOS
 cd android && bash build-apk.sh
+
+# Release 构建
+cd android && build-apk.bat --release     # → android/Mineradio-release.apk
 ```
 
 ---

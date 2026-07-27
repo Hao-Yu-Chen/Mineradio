@@ -43,7 +43,7 @@ const {
   sati_resource_sub_list,
   lyric,
   lyric_new,
-} = require('NeteaseCloudMusicApi');
+} = require('./ncm-wrapper');
 const http = require('http');
 const https = require('https');
 const fs   = require('fs');
