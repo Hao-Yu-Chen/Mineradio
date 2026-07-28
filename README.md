@@ -55,7 +55,7 @@ Mineradio 2.0 重新整理了视觉层次、桌面模式、主页与搜索体验
 
 **扩展音源配置**
 
-![扩展音源](docs/screenshots/pc端落雪源配置界面.png)
+![扩展音源](docs/screenshots/)
 
 ### 移动端（Android）
 
