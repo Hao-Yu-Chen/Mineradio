@@ -13,7 +13,7 @@ set SCRIPT_DIR=%~dp0
 
 set BUILD_TYPE=debug
 set TV_MODE=0
-set APP_VERSION=1.1.1
+set APP_VERSION=2.0.2
 
 :parse_args
 if "%~1"=="" goto check_env
