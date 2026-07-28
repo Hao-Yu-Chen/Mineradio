@@ -3,11 +3,27 @@
 const http = require('http');
 const https = require('https');
 const crypto = require('crypto');
+const tunnel = require('tunnel');
+
+// Proxy configuration (matching lx-source-engine.js)
+var LX_PROXY_HOST = process.env.LX_PROXY_HOST || '127.0.0.1';
+var LX_PROXY_PORT = parseInt(process.env.LX_PROXY_PORT || '10808', 10);
+var LX_PROXY_ENABLED = process.env.LX_PROXY_ENABLED === '1';
+function getRequestAgent(requestUrl) {
+  if (!LX_PROXY_ENABLED) return undefined;
+  if (/^https:/i.test(requestUrl)) {
+    try { return tunnel.httpsOverHttp({ proxy: { host: LX_PROXY_HOST, port: LX_PROXY_PORT } }); } catch(e) {}
+  } else {
+    try { return tunnel.httpOverHttp({ proxy: { host: LX_PROXY_HOST, port: LX_PROXY_PORT } }); } catch(e) {}
+  }
+  return undefined;
+}
 
 function httpGet(url, timeout) {
   return new Promise(function(resolve, reject) {
     var mod = url.startsWith('https:') ? https : http;
-    var req = mod.get(url, { timeout: timeout || 10000 }, function(res) {
+    var opts = { timeout: timeout || 10000, agent: getRequestAgent(url) };
+    var req = mod.get(url, opts, function(res) {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
         return httpGet(res.headers.location, timeout).then(resolve).catch(reject);
       }
@@ -26,7 +42,7 @@ function httpPost(url, body, headers, timeout) {
   return new Promise(function(resolve, reject) {
     var mod = url.startsWith('https:') ? https : http;
     var hdrs = Object.assign({}, headers || {}, { 'Content-Length': Buffer.byteLength(body || '') });
-    var req = mod.request(url, { method: 'POST', headers: hdrs, timeout: timeout || 10000 }, function(res) {
+    var req = mod.request(url, { method: 'POST', headers: hdrs, timeout: timeout || 10000, agent: getRequestAgent(url) }, function(res) {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
         return httpPost(res.headers.location, body, headers, timeout).then(resolve).catch(reject);
       }
@@ -47,7 +63,7 @@ function httpPostRaw(url, body, headers, timeout) {
   return new Promise(function(resolve, reject) {
     var mod = url.startsWith('https:') ? https : http;
     var hdrs = Object.assign({}, headers || {}, { 'Content-Length': Buffer.byteLength(body || '') });
-    var req = mod.request(url, { method: 'POST', headers: hdrs, timeout: timeout || 10000 }, function(res) {
+    var req = mod.request(url, { method: 'POST', headers: hdrs, timeout: timeout || 10000, agent: getRequestAgent(url) }, function(res) {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
         return httpPostRaw(res.headers.location, body, headers, timeout).then(resolve).catch(reject);
       }
@@ -450,6 +466,7 @@ function httpGetWithHeaders(url, headers) {
     var opts = {
       headers: Object.assign({}, headers),
       timeout: 10000,
+      agent: getRequestAgent(url),
     };
     mod.get(url, opts, function(res) {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
