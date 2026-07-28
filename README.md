@@ -53,6 +53,10 @@ Mineradio 2.0 重新整理了视觉层次、桌面模式、主页与搜索体验
 
 ![多来源搜索](docs/screenshots/根据源的不同来源可以进行查询筛选页面.png)
 
+**扩展音源配置**
+
+![扩展音源](docs/screenshots/pc端落雪源配置界面.png)
+
 ### 移动端（Android）
 
 > **注意**：当前安卓版本仅适配**横屏**模式，竖屏布局尚未优化，请在横屏下使用以获得完整体验。
@@ -64,6 +68,10 @@ Mineradio 2.0 重新整理了视觉层次、桌面模式、主页与搜索体验
 **扩展音源配置**
 
 ![Android 扩展音源](docs/screenshots/android端落雪源配置页面.png)
+
+**搜索页面**
+
+![Android 搜索](docs/screenshots/android端搜索页面.png)
 
 ---
 

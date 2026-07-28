@@ -32,7 +32,14 @@ function coverProxySrc(url, cacheBust) {
   if (!url) return '';
   if (isInlineCoverSrc(url)) return url;
   if (!isProxyableCoverUrl(url)) return '';
-  return '/api/cover?url=' + encodeURIComponent(url) + (cacheBust ? '&v=' + Date.now() : '');
+  var path = '/api/cover?url=' + encodeURIComponent(url) + (cacheBust ? '&v=' + Date.now() : '');
+  // On Android/mobile, CSS background-image URLs bypass mobile-bridge patches
+  // (which only intercept Image.src / fetch / XHR). Return absolute URL so the
+  // Node.js server on port 3000 is reached directly.
+  if (typeof window.desktopWindow !== 'undefined' && window.desktopWindow.isMobile) {
+    return 'http://127.0.0.1:3000' + path;
+  }
+  return path;
 }
 function coverUrlWithSize(url, size) {
   if (!url || isInlineCoverSrc(url) || !/^https?:\/\//i.test(url)) return url || '';
