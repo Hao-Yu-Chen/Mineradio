@@ -134,7 +134,7 @@
 
   // ── CSS fix (backdrop-filter white blocks) ──
   function fixStyles() {
-    var sel = '#home-btn,#upload-btn,#fx-fab,#user-btn,#visual-guide-btn,#play-btn,#pause-btn,.ctrl-btn,#top-right .icon-btn,.glass-saved-button,#search-box,#fx-fab-hide-btn,#user-capsule-hide-btn';
+    var sel = '#home-btn,#upload-btn,#fx-fab,#user-btn,#visual-guide-btn,#play-btn,#pause-btn,.ctrl-btn,#top-right .icon-btn,.glass-saved-button,#search-box,#fx-fab-hide-btn,#user-capsule-hide-btn,#_m_search_hide,#_m_topright_hide';
     var els = document.querySelectorAll(sel);
     els.forEach(function(el) {
       el.style.setProperty('backdrop-filter', 'none', 'important');
@@ -146,6 +146,103 @@
     if (pb) pb.style.setProperty('box-shadow', '0 4px 20px rgba(0,0,0,.25)', 'important');
     var uc = document.getElementById('user-capsule-hide-btn');
     if (uc) uc.style.display = 'none';
+  }
+
+  // ── Android: 搜索栏自动隐藏开关 ──
+  var SEARCH_AUTO_HIDE_KEY = 'mineradio-search-auto-hide-v1';
+  var TOP_RIGHT_AUTO_HIDE_KEY = 'mineradio-top-right-auto-hide-v1';
+  var searchAutoHide = true;
+  var topRightAutoHide = false;
+  try {
+    var _sah = localStorage.getItem(SEARCH_AUTO_HIDE_KEY);
+    if (_sah !== null) searchAutoHide = _sah === 'true' || _sah === '1';
+    var _trah = localStorage.getItem(TOP_RIGHT_AUTO_HIDE_KEY);
+    if (_trah !== null) topRightAutoHide = _trah === 'true' || _trah === '1';
+  } catch(e) {}
+
+  function injectSearchHideBtn() {
+    var controlsHideBtn = document.getElementById('controls-hide-btn');
+    if (!controlsHideBtn || document.getElementById('_m_search_hide')) return;
+    var b = document.createElement('button');
+    b.id = '_m_search_hide';
+    b.className = 'ctrl-btn' + (searchAutoHide ? ' active' : '');
+    b.title = searchAutoHide ? '搜索栏自动隐藏：开' : '搜索栏自动隐藏：关';
+    b.innerHTML = '<svg width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.35-4.35"/></svg>';
+    b.style.cssText = 'backdrop-filter:none;-webkit-backdrop-filter:none;background:rgba(8,9,11,.86);border-color:rgba(255,255,255,.10);';
+    b.addEventListener('pointerdown', function(e) {
+      e.preventDefault(); e.stopPropagation();
+      searchAutoHide = !searchAutoHide;
+      try { localStorage.setItem(SEARCH_AUTO_HIDE_KEY, searchAutoHide ? '1' : '0'); } catch(ex) {}
+      b.classList.toggle('active', searchAutoHide);
+      b.title = searchAutoHide ? '搜索栏自动隐藏：开' : '搜索栏自动隐藏：关';
+      document.body.classList.toggle('search-auto-hide-disabled', !searchAutoHide);
+      if (typeof showToast === 'function') showToast(searchAutoHide ? '搜索栏自动隐藏已开启' : '搜索栏已固定显示');
+    });
+    controlsHideBtn.parentNode.insertBefore(b, controlsHideBtn);
+  }
+
+  function injectTopRightHideBtn() {
+    var controlsHideBtn = document.getElementById('controls-hide-btn');
+    if (!controlsHideBtn || document.getElementById('_m_topright_hide')) return;
+    var b = document.createElement('button');
+    b.id = '_m_topright_hide';
+    b.className = 'ctrl-btn' + (topRightAutoHide ? ' active' : '');
+    b.title = topRightAutoHide ? 'Home/DIY/登录自动隐藏：开' : 'Home/DIY/登录自动隐藏：关';
+    b.innerHTML = '<svg width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M3 10.8 12 3l9 7.8"/><path d="M5 10v10h14V10"/></svg>';
+    b.style.cssText = 'backdrop-filter:none;-webkit-backdrop-filter:none;background:rgba(8,9,11,.86);border-color:rgba(255,255,255,.10);';
+    b.addEventListener('pointerdown', function(e) {
+      e.preventDefault(); e.stopPropagation();
+      topRightAutoHide = !topRightAutoHide;
+      try { localStorage.setItem(TOP_RIGHT_AUTO_HIDE_KEY, topRightAutoHide ? '1' : '0'); } catch(ex) {}
+      b.classList.toggle('active', topRightAutoHide);
+      b.title = topRightAutoHide ? 'Home/DIY/登录自动隐藏：开' : 'Home/DIY/登录自动隐藏：关';
+      applyTopRightAutoHide();
+      if (typeof showToast === 'function') showToast(topRightAutoHide ? 'Home/DIY/登录按钮已自动隐藏' : 'Home/DIY/登录按钮已固定显示');
+    });
+    controlsHideBtn.parentNode.insertBefore(b, controlsHideBtn);
+  }
+
+  function applySearchAutoHide() {
+    document.body.classList.toggle('search-auto-hide-disabled', !searchAutoHide);
+    // 指针移动处理：searchAutoHide 关闭时搜索栏始终可见
+    var style = document.getElementById('_m_search_hide_css');
+    if (!style) {
+      style = document.createElement('style');
+      style.id = '_m_search_hide_css';
+      document.head.appendChild(style);
+    }
+    style.textContent = 'body.search-auto-hide-disabled #search-area{top:24px;opacity:1;pointer-events:auto}' +
+      'body.search-auto-hide-disabled #search-area.stage-mode{top:18px}';
+  }
+
+  function applyTopRightAutoHide() {
+    // 复用 userCapsuleAutoHide 机制控制 Home/DIY/登录按钮的显示
+    if (typeof userCapsuleAutoHide !== 'undefined') {
+      userCapsuleAutoHide = topRightAutoHide;
+    }
+    if (typeof applyUserCapsuleAutoHideState === 'function') {
+      applyUserCapsuleAutoHideState();
+    }
+  }
+
+  // 补丁指针移动：searchAutoHide 关闭时搜索栏常显
+  function patchSearchPeek() {
+    var check = function() {
+      if (!searchAutoHide && typeof setPeek === 'function') {
+        var sa = document.getElementById('search-area');
+        if (sa) setPeek(sa, true, 'search');
+      }
+    };
+    // 在 DOM 准备好后补丁
+    var origMousemove = window.onmousemove;
+    document.addEventListener('pointermove', function(e) {
+      if (!searchAutoHide) {
+        var sa = document.getElementById('search-area');
+        if (sa && typeof setPeek === 'function') setPeek(sa, true, 'search');
+      }
+    }, { passive: true });
+    setTimeout(check, 500);
+    setTimeout(check, 2000);
   }
 
   // ── DIY button ──
@@ -204,10 +301,16 @@
     document.body.classList.add('mobile-app');
     fixStyles();
     addDiy();
+    applySearchAutoHide();
+    applyTopRightAutoHide();
+    injectSearchHideBtn();
+    injectTopRightHideBtn();
+    patchSearchPeek();
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run);
   else run();
   setTimeout(run, 1000);
+  setTimeout(run, 2000);
   setTimeout(fixParticles, 3000);
   setTimeout(fixParticles, 6000);
 })();
