@@ -8,6 +8,45 @@ if (typeof fxDefaults === 'object') {
   if (!('lxActiveSourceId' in fxDefaults)) fxDefaults.lxActiveSourceId = null;
   }
 
+// ── 跨源搜索缓存 (匹配 lx-music-desktop otherSourceCache 模式) ──
+var _lxCrossSearchCache = {};    // key → { ts, results }
+var _lxCrossSearchPromises = {}; // key → Promise (inflight dedup)
+var _LX_CROSS_CACHE_TTL = 60 * 60 * 1000; // 1 hour
+var _LX_CROSS_CACHE_MAX = 100;
+
+function _lxCrossCacheKey(name, artist) {
+  return ((name || '') + '|' + (artist || '')).toLowerCase().trim();
+}
+
+function _lxGetCrossCache(cacheKey) {
+  var entry = _lxCrossSearchCache[cacheKey];
+  if (!entry) return null;
+  if (Date.now() - entry.ts > _LX_CROSS_CACHE_TTL) {
+    delete _lxCrossSearchCache[cacheKey];
+    return null;
+  }
+  return entry.results;
+}
+
+function _lxSetCrossCache(cacheKey, results) {
+  var keys = Object.keys(_lxCrossSearchCache);
+  while (keys.length >= _LX_CROSS_CACHE_MAX) {
+    var oldest = null, oldestKey = null;
+    for (var i = 0; i < keys.length; i++) {
+      var e = _lxCrossSearchCache[keys[i]];
+      if (!oldest || e.ts < oldest) { oldest = e.ts; oldestKey = keys[i]; }
+    }
+    if (oldestKey) delete _lxCrossSearchCache[oldestKey];
+    keys = Object.keys(_lxCrossSearchCache);
+  }
+  _lxCrossSearchCache[cacheKey] = { ts: Date.now(), results: results };
+}
+
+function _lxClearCrossSearchCache() {
+  _lxCrossSearchCache = {};
+  _lxCrossSearchPromises = {};
+}
+
 // --- LX 模式独立歌单系统 ---
 var LX_PLAYLISTS_KEY = 'mineradio-lx-playlists-v2';
 var lxPlaylists = [];
@@ -1116,12 +1155,19 @@ function escHtmlLx(str) {
 
 // --- 播放 URL 解析: 补丁 playQueueAt 支持 LX 歌曲 ---
 (function patchPlayQueueAt() {
+  var lxFetchToken = 0; // increment on each new playQueueAt call; stale tokens abort
+
   function doPatch() {
     if (typeof playQueueAt !== 'function') { setTimeout(doPatch, 100); return; }
     var _origPlayQueueAt = playQueueAt;
     playQueueAt = async function(idx, opts) {
       opts = opts || {};
       var song = (typeof playQueue !== 'undefined' && playQueue && idx >= 0 && idx < playQueue.length) ? playQueue[idx] : null;
+      // Cancel any in-flight LX fetch from a previous call
+      lxFetchToken++;
+      var myToken = lxFetchToken;
+      function _lxCancelled() { return lxFetchToken !== myToken; }
+
       // 如果是 LX 歌曲且没有预先解析的 URL，先通过 LX API 获取播放 URL
       // 但在网络请求之前：立即暂停当前音频并更新底部栏，给用户即时反馈
       if (song && isLxSourceSong(song) && !opts.preResolvedPlaybackData && !opts.lxFallbackUrl && !opts.autoRepeat) {
@@ -1135,7 +1181,6 @@ function escHtmlLx(str) {
         var primaryId = song.songmid || song.mid || song.id || '';
         var activeSrc = lxSourceCache ? lxSourceCache.find(function(s) { return typeof fx !== 'undefined' && fx && s.id === fx.lxActiveSourceId; }) : null;
         var allSources = activeSrc && activeSrc.sources && activeSrc.sources.length ? activeSrc.sources : ['wy'];
-        // 按顺序排列：主源优先，然后其他源
         var sourcesToTry = [primarySrc];
         for (var ai = 0; ai < allSources.length; ai++) {
           if (allSources[ai] !== primarySrc) sourcesToTry.push(allSources[ai]);
@@ -1144,60 +1189,130 @@ function escHtmlLx(str) {
         if (lxLoadOverlay) lxLoadOverlay.classList.add('show');
         var rawQuality = typeof getProviderPlaybackQuality === 'function' ? getProviderPlaybackQuality('netease') : 'exhigh';
         var lxData = null;
-        for (var si = 0; si < sourcesToTry.length; si++) {
-          var trySrc = sourcesToTry[si];
-          var tryId = trySrc === primarySrc ? primaryId : '';
-          var trySong = trySrc === primarySrc ? song : null;
-          // 非主源：先搜索获取该平台的歌曲 ID
-          if (!tryId) {
-            var searchQ = encodeURIComponent((song.name || '').trim() + ' ' + (song.artist || song.singer || '').trim());
-            var searchUrl = '/api/lx/search?keywords=' + searchQ + '&source=' + encodeURIComponent(trySrc) + '&limit=3';
-            try {
-              var searchResult = typeof apiJson === 'function' ? await apiJson(searchUrl, { timeoutMs: 8000 }) : null;
-              if (searchResult && searchResult.songs && searchResult.songs.length) {
-                // 找最佳匹配（歌名完全相同优先）
-                var targetName = (song.name || '').toLowerCase().trim();
-                var bestMatch = null;
-                for (var ri = 0; ri < searchResult.songs.length; ri++) {
-                  var rs = searchResult.songs[ri];
-                  if (!rs || !rs.id) continue;
-                  var rsName = (rs.name || '').toLowerCase().trim();
-                  if (rsName === targetName) { bestMatch = rs; break; }
-                  if (!bestMatch && rsName.indexOf(targetName) >= 0) bestMatch = rs;
-                  if (!bestMatch && targetName.indexOf(rsName) >= 0) bestMatch = rs;
-                }
-                if (!bestMatch) bestMatch = searchResult.songs[0];
-                if (bestMatch) {
-                  tryId = bestMatch.songmid || bestMatch.mid || bestMatch.id || '';
-                  trySong = bestMatch;
-                }
-              }
-            } catch(e) { /* search failed, skip this source */ }
-          }
-          if (!tryId) continue;
-          // 构建 URL 并请求
-          var tryUrl = '/api/lx/song/url?source=' + encodeURIComponent(trySrc) + '&songId=' + encodeURIComponent(tryId) + '&quality=' + encodeURIComponent(rawQuality);
-          if (trySong) {
-            var tryHash = trySong.hash || trySong.copyrightId || '';
-            if (tryHash && tryHash !== tryId) tryUrl += '&hash=' + encodeURIComponent(tryHash);
-            if (trySong.copyrightId && trySong.copyrightId !== tryHash) tryUrl += '&copyrightId=' + encodeURIComponent(trySong.copyrightId);
-            if (trySong.name) tryUrl += '&name=' + encodeURIComponent(trySong.name);
-            if (trySong.artist || trySong.singer) tryUrl += '&singer=' + encodeURIComponent(trySong.artist || trySong.singer || '');
-            if (trySong.interval) tryUrl += '&interval=' + encodeURIComponent(trySong.interval);
-            if (trySong.album) tryUrl += '&album=' + encodeURIComponent(trySong.album || '');
-            if (trySong.img || trySong.cover) tryUrl += '&img=' + encodeURIComponent(trySong.img || trySong.cover || '');
+
+        // Helper: build song/url request URL for a source
+        function _buildLxUrl(src, songId, srcSong) {
+          var u = '/api/lx/song/url?source=' + encodeURIComponent(src) + '&songId=' + encodeURIComponent(songId) + '&quality=' + encodeURIComponent(rawQuality);
+          if (srcSong) {
+            var h = srcSong.hash || srcSong.copyrightId || '';
+            if (h && h !== songId) u += '&hash=' + encodeURIComponent(h);
+            if (srcSong.copyrightId && srcSong.copyrightId !== h) u += '&copyrightId=' + encodeURIComponent(srcSong.copyrightId);
+            if (srcSong.name) u += '&name=' + encodeURIComponent(srcSong.name);
+            if (srcSong.artist || srcSong.singer) u += '&singer=' + encodeURIComponent(srcSong.artist || srcSong.singer || '');
+            if (srcSong.interval) u += '&interval=' + encodeURIComponent(srcSong.interval);
+            if (srcSong.album) u += '&album=' + encodeURIComponent(srcSong.album || '');
+            if (srcSong.img || srcSong.cover) u += '&img=' + encodeURIComponent(srcSong.img || srcSong.cover || '');
           } else {
-            if (song.name) tryUrl += '&name=' + encodeURIComponent(song.name);
-            if (song.artist || song.singer) tryUrl += '&singer=' + encodeURIComponent(song.artist || song.singer || '');
+            if (song.name) u += '&name=' + encodeURIComponent(song.name);
+            if (song.artist || song.singer) u += '&singer=' + encodeURIComponent(song.artist || song.singer || '');
           }
-          try {
-            lxData = typeof apiJson === 'function' ? await apiJson(tryUrl, { timeoutMs: 10000 }) : null;
-            if (lxData && lxData.url) {
-              lxData.provider = trySrc;
-              break;
+          return u;
+        }
+
+        // Helper: search for a song on a source platform, returns best match
+        async function _searchAltSource(src) {
+          var cacheKey = _lxCrossCacheKey(song.name, song.artist || song.singer || '');
+          var cached = _lxGetCrossCache(cacheKey);
+          if (cached) {
+            for (var ci = 0; ci < cached.length; ci++) {
+              if (cached[ci]._lxSrc === src) return cached[ci];
             }
-          } catch (e) {
-            console.warn('[LX] source ' + trySrc + ' failed:', e.message || e);
+          }
+          var searchQ = encodeURIComponent((song.name || '').trim() + ' ' + (song.artist || song.singer || '').trim());
+          var searchUrl = '/api/lx/search?keywords=' + searchQ + '&source=' + encodeURIComponent(src) + '&limit=3';
+          var searchResult = typeof apiJson === 'function' ? await apiJson(searchUrl, { timeoutMs: 6000 }) : null;
+          if (!searchResult || !searchResult.songs || !searchResult.songs.length) return null;
+          var targetName = (song.name || '').toLowerCase().trim();
+          var bestMatch = null;
+          var allResults = [];
+          for (var ri = 0; ri < searchResult.songs.length; ri++) {
+            var rs = searchResult.songs[ri];
+            if (!rs || !rs.id) continue;
+            rs._lxSrc = src;
+            allResults.push(rs);
+            var rsName = (rs.name || '').toLowerCase().trim();
+            if (rsName === targetName) { bestMatch = rs; break; }
+            if (!bestMatch && rsName.indexOf(targetName) >= 0) bestMatch = rs;
+            if (!bestMatch && targetName.indexOf(rsName) >= 0) bestMatch = rs;
+          }
+          if (!bestMatch) bestMatch = allResults[0];
+          if (allResults.length > 0) {
+            var prevCached = _lxGetCrossCache(cacheKey) || [];
+            _lxSetCrossCache(cacheKey, prevCached.concat(allResults));
+          }
+          return bestMatch;
+        }
+
+        // Helper: get song URL for a source, returns lxData or null
+        async function _fetchSongUrl(src, songId, srcSong) {
+          var tryUrl = _buildLxUrl(src, songId, srcSong);
+          var result = typeof apiJson === 'function' ? await apiJson(tryUrl, { timeoutMs: 10000 }) : null;
+          if (result && result.url) {
+            result.provider = src;
+            return result;
+          }
+          return null;
+        }
+
+        // Helper: resolve a source (search if needed, then get URL)
+        async function _resolveSource(src) {
+          if (src === primarySrc && primaryId) {
+            return _fetchSongUrl(src, primaryId, song);
+          }
+          var altSong = await _searchAltSource(src);
+          if (!altSong) return null;
+          var altId = altSong.songmid || altSong.mid || altSong.id || '';
+          if (!altId) return null;
+          return _fetchSongUrl(src, altId, altSong);
+        }
+
+        // ---- Main flow: primary first, then parallel alt sources ----
+        // Try primary source first (most likely to work, no search overhead)
+        lxData = await _resolveSource(primarySrc);
+        if (_lxCancelled()) return;
+
+        // If primary failed, try all alternative sources in parallel
+        if (!lxData || !lxData.url) {
+          var altSources = sourcesToTry.slice(1); // skip primary
+          if (altSources.length > 0) {
+            // Race: first alt source to return a playable URL wins
+            // Manual Promise.any polyfill (safe for older WebViews)
+            var altResolvers = [];
+            var raceResolve = null;
+            var raceReject = null;
+            var raceSettled = false;
+            var racePending = altSources.length;
+            var racePromise = new Promise(function(res, rej) { raceResolve = res; raceReject = rej; });
+
+            var _raceDone = function(data) {
+              if (!raceSettled) { raceSettled = true; raceResolve(data); }
+            };
+            var _raceFail = function() {
+              racePending--;
+              if (racePending <= 0 && !raceSettled) { raceSettled = true; raceResolve(null); }
+            };
+
+            // Overall timeout for alt source resolution: 12 seconds
+            var raceTimer = setTimeout(function() { _raceDone(null); }, 12000);
+
+            for (var asi = 0; asi < altSources.length; asi++) {
+              (function(altSrc) {
+                _resolveSource(altSrc).then(function(result) {
+                  if (result && result.url) {
+                    clearTimeout(raceTimer);
+                    _raceDone(result);
+                  } else {
+                    _raceFail();
+                  }
+                }).catch(function() {
+                  _raceFail();
+                });
+              })(altSources[asi]);
+            }
+
+            var raceResult = await racePromise;
+            clearTimeout(raceTimer);
+            if (raceResult && raceResult.url) lxData = raceResult;
           }
         }
         if (lxData && lxData.url) {
