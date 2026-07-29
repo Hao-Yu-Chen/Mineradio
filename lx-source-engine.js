@@ -23,7 +23,21 @@ function getRequestAgent(url) {
   } catch(e) { return undefined; }
 }
 
-const SOURCES_DIR = path.join(__dirname, '.lx-sources');
+// Resolve data directory that survives APK updates on Android.
+// On desktop: __dirname/.lx-sources (backward compatible).
+// On Android: os.homedir()/files/lx-sources (same pattern as cookie/beatmap paths).
+var _lxDataDir = (function() {
+  if (typeof process !== 'undefined' && process.env && process.env.LX_DATA_DIR) return process.env.LX_DATA_DIR;
+  try {
+    var home = require('os').homedir();
+    if (home && home !== '/' && home.indexOf('/data/data/') === 0) {
+      // Android: use app-private files directory (survives APK updates)
+      return path.join(home, 'files', 'lx-sources');
+    }
+  } catch(e) {}
+  return path.join(__dirname, '.lx-sources');
+})();
+const SOURCES_DIR = _lxDataDir;
 const INDEX_FILE = path.join(SOURCES_DIR, 'index.json');
 const STATE_FILE = path.join(SOURCES_DIR, 'state.json');
 
@@ -471,7 +485,7 @@ function loadAllSources() {
           var stillExists = loadedSources.some(function(ls) { return ls.id === state.activeId; });
           activeSourceId = stillExists ? state.activeId : (loadedSources.length > 0 ? loadedSources[0].id : null);
           if (!stillExists && activeSourceId) {
-            try { fs.writeFileSync(STATE_FILE, JSON.stringify({ enabled: lxEnabled, activeId: activeSourceId }), 'utf8'); } catch (e) {}
+            _saveState();
           }
           // Reload the active source to register its handlers (wait for completion)
           if (activeSourceId) {
@@ -536,11 +550,8 @@ function setActiveSource(id, enabled) {
       console.error('[lx-engine] Reload on switch error:', err.message);
     });
   }
-  // Persist state
-  try {
-    ensureDir();
-    fs.writeFileSync(STATE_FILE, JSON.stringify({ enabled: lxEnabled, activeId: activeSourceId }), 'utf8');
-  } catch (e) {}
+  // Persist state (atomic write, preserves cacheConfig)
+  _saveState();
 }
 
 function getActiveSource() {
@@ -757,6 +768,26 @@ var cacheConfig = {
   crossSourceCache.updateConfig({ maxEntries: cacheConfig.crossMax, ttl: cacheConfig.crossTtlMinutes * 60 * 1000 });
 })();
 
+function _saveState() {
+  try {
+    ensureDir();
+    var state = {};
+    // Preserve cacheConfig if present
+    if (fs.existsSync(STATE_FILE)) {
+      try { state = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')); } catch (e) {}
+    }
+    state.enabled = lxEnabled;
+    state.activeId = activeSourceId;
+    if (cacheConfig) state.cacheConfig = Object.assign(state.cacheConfig || {}, cacheConfig);
+    // Atomic write: tmp → rename to avoid corruption on crash
+    var tmp = STATE_FILE + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(state, null, 2), 'utf8');
+    fs.renameSync(tmp, STATE_FILE);
+  } catch (e) {
+    console.error('[lx-engine] Failed to save state:', e.message);
+  }
+}
+
 function _saveCacheConfig() {
   try {
     var state = {};
@@ -764,7 +795,9 @@ function _saveCacheConfig() {
       try { state = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')); } catch (e) {}
     }
     state.cacheConfig = cacheConfig;
-    fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2), 'utf8');
+    var tmp = STATE_FILE + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(state, null, 2), 'utf8');
+    fs.renameSync(tmp, STATE_FILE);
   } catch (e) {
     console.error('[lx-engine] Failed to save cache config:', e.message);
   }
