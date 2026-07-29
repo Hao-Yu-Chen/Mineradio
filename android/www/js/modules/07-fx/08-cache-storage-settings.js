@@ -79,4 +79,38 @@ function restartMineradioForCachePath() {
   window.desktopWindow.restartApp();
 }
 
-setTimeout(refreshMineradioCacheSettings, 450);
+// ── LX 音乐数据缓存管理 ──
+function refreshLxCacheStats() {
+  fetch('/api/lx/cache/stats').then(function(r) { return r.json(); }).then(function(s) {
+    setMineradioCacheStorageText('cache-lx-url-count', s.url + ' 条');
+    setMineradioCacheStorageText('cache-lx-lyric-count', s.lyric + ' 条');
+    setMineradioCacheStorageText('cache-lx-cross-count', s.crossSource + ' 条');
+    if (s.urlFailed > 0 || s.lyricFailed > 0 || s.crossFailed > 0) {
+      var parts = [];
+      if (s.urlFailed > 0) parts.push(s.urlFailed + ' 条脏 URL');
+      if (s.lyricFailed > 0) parts.push(s.lyricFailed + ' 条脏歌词');
+      if (s.crossFailed > 0) parts.push(s.crossFailed + ' 条脏跨源');
+      if (typeof showToast === 'function') showToast('LX 缓存: ' + s.url + ' URL / ' + s.lyric + ' 歌词 / ' + s.crossSource + ' 跨源 (脏数据: ' + parts.join(', ') + ')');
+    }
+  }).catch(function() {
+    setMineradioCacheStorageText('cache-lx-url-count', '离线');
+    setMineradioCacheStorageText('cache-lx-lyric-count', '离线');
+    setMineradioCacheStorageText('cache-lx-cross-count', '离线');
+  });
+}
+
+function clearLxCache(type) {
+  var labels = { url: 'URL 缓存', lyric: '歌词缓存', crossSource: '跨源搜索缓存', all: '全部 LX 缓存' };
+  var label = labels[type] || type;
+  fetch('/api/lx/cache/clear', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: type }) })
+    .then(function(r) { return r.json(); }).then(function(d) {
+      if (d.ok) {
+        if (typeof showToast === 'function') showToast('已清除 ' + d.cleared + ' 条 ' + label);
+      }
+      refreshLxCacheStats();
+    }).catch(function() {
+      if (typeof showToast === 'function') showToast('清除 ' + label + ' 失败');
+    });
+}
+
+setTimeout(refreshLxCacheStats, 600);

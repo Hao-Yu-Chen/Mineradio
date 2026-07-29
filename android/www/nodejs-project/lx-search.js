@@ -3,13 +3,61 @@
 const http = require('http');
 const https = require('https');
 const crypto = require('crypto');
+const tunnel = require('tunnel');
 
-function httpGet(url, timeout) {
+// Proxy configuration (matching lx-source-engine.js)
+var LX_PROXY_HOST = process.env.LX_PROXY_HOST || '127.0.0.1';
+var LX_PROXY_PORT = parseInt(process.env.LX_PROXY_PORT || '10808', 10);
+var LX_PROXY_ENABLED = process.env.LX_PROXY_ENABLED === '1';
+function getRequestAgent(requestUrl) {
+  if (!LX_PROXY_ENABLED) return undefined;
+  if (/^https:/i.test(requestUrl)) {
+    try { return tunnel.httpsOverHttp({ proxy: { host: LX_PROXY_HOST, port: LX_PROXY_PORT } }); } catch(e) {}
+  } else {
+    try { return tunnel.httpOverHttp({ proxy: { host: LX_PROXY_HOST, port: LX_PROXY_PORT } }); } catch(e) {}
+  }
+  return undefined;
+}
+
+function _isRetryableHttpError(err, statusCode) {
+  if (statusCode === 429) return true;
+  if (statusCode && statusCode >= 400 && statusCode < 500) return false; // 4xx non-429
+  if (err) {
+    var msg = (err.message || '').toLowerCase();
+    if (msg.indexOf('etimedout') >= 0 || msg.indexOf('econnreset') >= 0 ||
+        msg.indexOf('enotfound') >= 0 || msg.indexOf('socket hang up') >= 0 ||
+        msg.indexOf('timeout') >= 0) return true;
+  }
+  if (statusCode && statusCode >= 500) return true;
+  return false;
+}
+
+function _httpWithRetry(fn, args, maxRetries) {
+  maxRetries = maxRetries || 3;
+  var attempt = 0;
+  function _try() {
+    return fn.apply(null, args).catch(function(err) {
+      var statusCode = err && err.statusCode ? err.statusCode : 0;
+      if (attempt < maxRetries && _isRetryableHttpError(err, statusCode)) {
+        attempt++;
+        var delay = statusCode === 429
+          ? 2000 + Math.floor(Math.random() * 4000)
+          : Math.min(1000 * Math.pow(2, attempt - 1), 10000);
+        return new Promise(function(resolve) { setTimeout(resolve, delay); }).then(_try);
+      }
+      throw err;
+    });
+  }
+  return _try();
+}
+
+function _httpGetRaw(url, timeout) {
   return new Promise(function(resolve, reject) {
     var mod = url.startsWith('https:') ? https : http;
-    var req = mod.get(url, { timeout: timeout || 10000 }, function(res) {
+    var opts = { timeout: timeout || 10000, agent: getRequestAgent(url) };
+    var req = mod.get(url, opts, function(res) {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-        return httpGet(res.headers.location, timeout).then(resolve).catch(reject);
+        return _httpGetRaw(res.headers.location, timeout).then(resolve).catch(reject);
       }
       var chunks = [];
       res.on('data', function(c) { chunks.push(c); });
@@ -22,13 +70,13 @@ function httpGet(url, timeout) {
   });
 }
 
-function httpPost(url, body, headers, timeout) {
+function _httpPostRaw(url, body, headers, timeout) {
   return new Promise(function(resolve, reject) {
     var mod = url.startsWith('https:') ? https : http;
     var hdrs = Object.assign({}, headers || {}, { 'Content-Length': Buffer.byteLength(body || '') });
-    var req = mod.request(url, { method: 'POST', headers: hdrs, timeout: timeout || 10000 }, function(res) {
+    var req = mod.request(url, { method: 'POST', headers: hdrs, timeout: timeout || 10000, agent: getRequestAgent(url) }, function(res) {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-        return httpPost(res.headers.location, body, headers, timeout).then(resolve).catch(reject);
+        return _httpPostRaw(res.headers.location, body, headers, timeout).then(resolve).catch(reject);
       }
       var chunks = [];
       res.on('data', function(c) { chunks.push(c); });
@@ -43,13 +91,13 @@ function httpPost(url, body, headers, timeout) {
   });
 }
 
-function httpPostRaw(url, body, headers, timeout) {
+function _httpPostBufferRaw(url, body, headers, timeout) {
   return new Promise(function(resolve, reject) {
     var mod = url.startsWith('https:') ? https : http;
     var hdrs = Object.assign({}, headers || {}, { 'Content-Length': Buffer.byteLength(body || '') });
-    var req = mod.request(url, { method: 'POST', headers: hdrs, timeout: timeout || 10000 }, function(res) {
+    var req = mod.request(url, { method: 'POST', headers: hdrs, timeout: timeout || 10000, agent: getRequestAgent(url) }, function(res) {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-        return httpPostRaw(res.headers.location, body, headers, timeout).then(resolve).catch(reject);
+        return _httpPostBufferRaw(res.headers.location, body, headers, timeout).then(resolve).catch(reject);
       }
       var chunks = [];
       res.on('data', function(c) { chunks.push(c); });
@@ -59,6 +107,17 @@ function httpPostRaw(url, body, headers, timeout) {
     if (body) req.write(body);
     req.end();
   });
+}
+
+// Retry-wrapped public functions — match lx-music-desktop's 3-retry behavior
+function httpGet(url, timeout) {
+  return _httpWithRetry(_httpGetRaw, [url, timeout]);
+}
+function httpPost(url, body, headers, timeout) {
+  return _httpWithRetry(_httpPostRaw, [url, body, headers, timeout]);
+}
+function httpPostRaw(url, body, headers, timeout) {
+  return _httpWithRetry(_httpPostBufferRaw, [url, body, headers, timeout]);
 }
 
 function decodeHTMLEntities(str) {
@@ -450,6 +509,7 @@ function httpGetWithHeaders(url, headers) {
     var opts = {
       headers: Object.assign({}, headers),
       timeout: 10000,
+      agent: getRequestAgent(url),
     };
     mod.get(url, opts, function(res) {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {

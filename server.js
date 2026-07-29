@@ -7588,6 +7588,42 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // ---------- LX 缓存管理 ----------
+  if (pn === '/api/lx/cache/stats' && req.method === 'GET') {
+    var s = lxEngine.getCacheStats();
+    sendJSON(res, { url: s.url.count, lyric: s.lyric.count, crossSource: s.crossSource.count,
+      urlFailed: s.url.failed, lyricFailed: s.lyric.failed, crossFailed: s.crossSource.failed });
+    return;
+  }
+
+  if (pn === '/api/lx/cache/clear' && req.method === 'POST') {
+    try {
+      var clearBody = await readRequestBody(req);
+      var clearType = (clearBody && clearBody.type) || 'all';
+      var cleared = lxEngine.clearCache(clearType);
+      sendJSON(res, { ok: true, cleared: cleared, type: clearType });
+    } catch (e) {
+      sendJSON(res, { ok: false, error: e.message }, 500);
+    }
+    return;
+  }
+
+  if (pn === '/api/lx/cache/config' && req.method === 'GET') {
+    sendJSON(res, lxEngine.getCacheConfig());
+    return;
+  }
+
+  if (pn === '/api/lx/cache/config' && req.method === 'POST') {
+    try {
+      var configBody = await readRequestBody(req);
+      lxEngine.updateCacheConfig(configBody);
+      sendJSON(res, { ok: true });
+    } catch (e) {
+      sendJSON(res, { ok: false, error: e.message }, 500);
+    }
+    return;
+  }
+
   // ---------- 静态资源 ----------
   if (pn === '/favicon.ico') {
     serveStatic(res, path.join(__dirname, 'build', 'icon.ico'));

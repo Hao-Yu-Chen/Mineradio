@@ -88,73 +88,107 @@ function createLxAPI() {
     request: function lxRequest(url, options, callback) {
       if (typeof options === 'function') { callback = options; options = {}; }
       options = options || {};
-      var method = (options.method || 'GET').toUpperCase();
-      var parsed = new URL(url);
-      var mod = parsed.protocol === 'https:' ? https : http;
-      var reqHeaders = Object.assign({}, options.headers || {});
-      // Add default User-Agent matching lx-music-desktop's needle behavior
-      if (!reqHeaders['User-Agent'] && !reqHeaders['user-agent']) {
-        reqHeaders['User-Agent'] = 'lx-music-desktop/' + lxStore.version;
-      }
-      var reqTimeout = options.timeout || 15000;
-      var reqOptions = {
-        method: method,
-        hostname: parsed.hostname,
-        port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
-        path: parsed.pathname + parsed.search,
-        headers: reqHeaders,
-        agent: getRequestAgent(url),
-      };
-      var timedOut = false;
-      // Explicit setTimeout-based timeout (more reliable than socket timeout alone)
-      var timer = setTimeout(function() {
-        if (!timedOut) {
-          timedOut = true;
-          req.destroy();
-          callback(new Error('Request timeout after ' + reqTimeout + 'ms'));
-        }
-      }, reqTimeout);
+      var MAX_RETRIES = 3;
+      var attempt = 0;
+      var currentCancel = null;
+      var cancelled = false;
 
-      var req = mod.request(reqOptions, function(res) {
-        // Handle redirect — needle follows automatically, we must do it manually
-        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-          clearTimeout(timer);
-          var redirectUrl = res.headers.location;
-          if (!/^https?:\/\//i.test(redirectUrl)) {
-            redirectUrl = parsed.protocol + '//' + parsed.host + redirectUrl;
-          }
-          lxRequest(redirectUrl, options, callback);
-          return;
+      function _shouldRetry(err, statusCode) {
+        if (statusCode === 429) return 2000 + Math.floor(Math.random() * 4000);
+        if (statusCode && statusCode >= 400 && statusCode < 500) return -1; // 4xx non-429
+        if (err) {
+          var msg = (err.message || '').toLowerCase();
+          if (msg.indexOf('etimedout') >= 0 || msg.indexOf('econnreset') >= 0 ||
+              msg.indexOf('enotfound') >= 0 || msg.indexOf('socket hang up') >= 0 ||
+              msg.indexOf('timeout') >= 0) return 0; // exponential backoff per attempt
         }
-        var chunks = [];
-        res.on('data', function(c) { chunks.push(c); });
-        res.on('end', function() {
-          if (timedOut) return;
-          clearTimeout(timer);
-          // Matching needle behavior: always convert raw to string first, then try JSON parse
-          var rawString = Buffer.concat(chunks).toString('utf8');
-          var body = rawString;
-          try {
-            body = JSON.parse(rawString);
-          } catch (e) {}
-          callback(null, {
-            statusCode: res.statusCode,
-            headers: res.headers,
-            body: body,
+        if (statusCode && statusCode >= 500) return 0;
+        return -1;
+      }
+
+      function _singleRequest(innerUrl, innerOptions, innerCallback) {
+        var method = (innerOptions.method || 'GET').toUpperCase();
+        var parsed = new URL(innerUrl);
+        var mod = parsed.protocol === 'https:' ? https : http;
+        var reqHeaders = Object.assign({}, innerOptions.headers || {});
+        if (!reqHeaders['User-Agent'] && !reqHeaders['user-agent']) {
+          reqHeaders['User-Agent'] = 'lx-music-desktop/' + lxStore.version;
+        }
+        var reqTimeout = innerOptions.timeout || 12000;
+        var reqOptions = {
+          method: method,
+          hostname: parsed.hostname,
+          port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
+          path: parsed.pathname + parsed.search,
+          headers: reqHeaders,
+          agent: getRequestAgent(innerUrl),
+        };
+        var timedOut = false;
+        var timer = setTimeout(function() {
+          if (!timedOut) {
+            timedOut = true;
+            req.destroy();
+            innerCallback(new Error('Request timeout after ' + reqTimeout + 'ms'));
+          }
+        }, reqTimeout);
+
+        var req = mod.request(reqOptions, function(res) {
+          if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+            clearTimeout(timer);
+            var redirectUrl = res.headers.location;
+            if (!/^https?:\/\//i.test(redirectUrl)) {
+              redirectUrl = parsed.protocol + '//' + parsed.host + redirectUrl;
+            }
+            _singleRequest(redirectUrl, innerOptions, innerCallback);
+            return;
+          }
+          var chunks = [];
+          res.on('data', function(c) { chunks.push(c); });
+          res.on('end', function() {
+            if (timedOut) return;
+            clearTimeout(timer);
+            var rawString = Buffer.concat(chunks).toString('utf8');
+            var body = rawString;
+            try { body = JSON.parse(rawString); } catch (e) {}
+            innerCallback(null, {
+              statusCode: res.statusCode,
+              headers: res.headers,
+              body: body,
+            });
           });
         });
-      });
-      req.on('error', function(err) {
-        if (!timedOut) { timedOut = true; clearTimeout(timer); callback(err); }
-      });
-      if (options.body) req.write(options.body);
-      if (options.form) {
-        var formData = new URLSearchParams(options.form).toString();
-        req.setHeader('Content-Type', 'application/x-www-form-urlencoded');
-        req.write(formData);
+        req.on('error', function(err) {
+          if (!timedOut) { timedOut = true; clearTimeout(timer); innerCallback(err); }
+        });
+        if (innerOptions.body) req.write(innerOptions.body);
+        if (innerOptions.form) {
+          var formData = new URLSearchParams(innerOptions.form).toString();
+          req.setHeader('Content-Type', 'application/x-www-form-urlencoded');
+          req.write(formData);
+        }
+        req.end();
+        return function() { try { req.destroy(); } catch (e) {} };
       }
-      req.end();
-      return function() { try { req.destroy(); } catch (e) {} };
+
+      function _doAttempt() {
+        if (cancelled) return;
+        currentCancel = _singleRequest(url, options, function(err, res) {
+          if (cancelled) return;
+          if (err || (res && res.statusCode >= 400)) {
+            var retryDelay = _shouldRetry(err, res ? res.statusCode : 0);
+            if (retryDelay >= 0 && attempt < MAX_RETRIES) {
+              attempt++;
+              var delay = retryDelay > 0 ? retryDelay : Math.min(1000 * Math.pow(2, attempt - 1), 10000);
+              setTimeout(_doAttempt, delay);
+              return;
+            }
+          }
+          callback(err, res);
+        });
+      }
+
+      _doAttempt();
+      return function() { cancelled = true; if (currentCancel) currentCancel(); };
     },
     on: function(eventName, handler) {
       if (!lxStore.handlers[eventName]) lxStore.handlers[eventName] = [];
@@ -525,16 +559,246 @@ function getStatus() {
   };
 }
 
+// ============================================================
+// Generic CacheStore — persistent JSON + memory with TTL, LRU eviction,
+// failCount pollution protection, and dynamic configuration.
+// ============================================================
+function createCacheStore(opts) {
+  opts = opts || {};
+  var store = {
+    name: opts.name || 'cache',
+    maxEntries: opts.maxEntries || 300,
+    ttl: opts.ttl || 1800000,
+    filePath: opts.filePath || null,
+    entries: {},    // key → { value, ts, failCount }
+    dirty: false,
+    persistTimer: null,
+  };
+
+  // Load from file if specified
+  if (store.filePath) {
+    loadCacheStore(store);
+  }
+
+  function _scheduleFlush() {
+    if (!store.filePath) return;
+    store.dirty = true;
+    if (store.persistTimer) clearTimeout(store.persistTimer);
+    store.persistTimer = setTimeout(function() { flushCacheStore(store); }, 5000);
+  }
+
+  function _evictOldest() {
+    var keys = Object.keys(store.entries);
+    if (keys.length >= store.maxEntries) {
+      var oldest = null, oldestKey = null;
+      for (var i = 0; i < keys.length; i++) {
+        var e = store.entries[keys[i]];
+        if (!oldest || e.ts < oldest) { oldest = e.ts; oldestKey = keys[i]; }
+      }
+      if (oldestKey) delete store.entries[oldestKey];
+    }
+  }
+
+  function _validateEntry(entry) {
+    if (!entry) return false;
+    var age = Date.now() - entry.ts;
+    if (age > store.ttl) return false;          // expired
+    if (entry.failCount >= 3) return false;      // too many failures (pollution protection)
+    return true;
+  }
+
+  return {
+    get: function(key) {
+      var entry = store.entries[key];
+      if (!_validateEntry(entry)) {
+        if (entry) delete store.entries[key];
+        return null;
+      }
+      return entry.value;
+    },
+
+    set: function(key, value) {
+      var existing = store.entries[key];
+      var prevFail = existing ? existing.failCount : 0;
+      _evictOldest();
+      store.entries[key] = { value: value, ts: Date.now(), failCount: prevFail };
+      _scheduleFlush();
+    },
+
+    markFailed: function(key) {
+      var entry = store.entries[key];
+      if (entry) {
+        entry.failCount = (entry.failCount || 0) + 1;
+        if (entry.failCount >= 3) {
+          delete store.entries[key];
+          _scheduleFlush();
+          return true; // evicted
+        }
+        _scheduleFlush();
+      }
+      return false;
+    },
+
+    delete: function(key) {
+      if (store.entries[key]) {
+        delete store.entries[key];
+        _scheduleFlush();
+      }
+    },
+
+    clear: function() {
+      store.entries = {};
+      store.dirty = true;
+      if (store.filePath) flushCacheStore(store);
+    },
+
+    stats: function() {
+      var count = 0, failed = 0;
+      var keys = Object.keys(store.entries);
+      for (var i = 0; i < keys.length; i++) {
+        var e = store.entries[keys[i]];
+        if (_validateEntry(e)) { count++; if (e.failCount > 0) failed++; }
+        else delete store.entries[keys[i]];
+      }
+      return { name: store.name, count: count, max: store.maxEntries, failed: failed };
+    },
+
+    updateConfig: function(config) {
+      if (config.maxEntries != null) {
+        store.maxEntries = config.maxEntries;
+        // Evict excess entries
+        var keys = Object.keys(store.entries);
+        while (keys.length > store.maxEntries) {
+          _evictOldest();
+          keys = Object.keys(store.entries);
+        }
+      }
+      if (config.ttl != null) store.ttl = config.ttl;
+      _scheduleFlush();
+    },
+
+    getConfig: function() {
+      return { name: store.name, maxEntries: store.maxEntries, ttl: store.ttl, persistent: !!store.filePath };
+    },
+
+    flush: function() {
+      if (store.filePath) flushCacheStore(store);
+    },
+  };
+}
+
+function loadCacheStore(store) {
+  try {
+    if (fs.existsSync(store.filePath)) {
+      var raw = fs.readFileSync(store.filePath, 'utf8');
+      store.entries = JSON.parse(raw);
+      if (!store.entries || typeof store.entries !== 'object') store.entries = {};
+    }
+  } catch (e) {
+    console.error('[lx-engine] Failed to load ' + store.name + ' cache:', e.message);
+    store.entries = {};
+  }
+}
+
+function flushCacheStore(store) {
+  if (!store.filePath) return;
+  try {
+    var tmp = store.filePath + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(store.entries, null, 2), 'utf8');
+    fs.renameSync(tmp, store.filePath);
+    store.dirty = false;
+  } catch (e) {
+    console.error('[lx-engine] Failed to persist ' + store.name + ' cache:', e.message);
+  }
+}
+
+// Validates that a lyric string contains at least one timestamp tag like [01:23.45]
+// Missing timestamps = garbage data that should be evicted.
+var LYRIC_TIMESTAMP_RE = /\[\d{1,2}:.*\d{1,4}\]/;
+
+// ============================================================
+// Cache instances
+// ============================================================
+var CACHE_DIR = SOURCES_DIR;
+
+var musicUrlCache = createCacheStore({
+  name: 'url', maxEntries: 300, ttl: 30 * 60 * 1000,
+  filePath: path.join(CACHE_DIR, 'url_cache.json'),
+});
+
+var lyricCache = createCacheStore({
+  name: 'lyric', maxEntries: 500, ttl: 7 * 24 * 60 * 60 * 1000,
+  filePath: path.join(CACHE_DIR, 'lyric_cache.json'),
+});
+
+var crossSourceCache = createCacheStore({
+  name: 'cross', maxEntries: 150, ttl: 60 * 60 * 1000,
+  // memory-only (no filePath)
+});
+
+// Default config
+var cacheConfig = {
+  urlMax: 300, urlTtlMinutes: 30,
+  lyricMax: 500, lyricTtlDays: 7,
+  crossMax: 150, crossTtlMinutes: 60,
+};
+
+// Load config overrides from state file
+(function _loadCacheConfig() {
+  try {
+    if (fs.existsSync(STATE_FILE)) {
+      var state = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
+      if (state && state.cacheConfig) Object.assign(cacheConfig, state.cacheConfig);
+    }
+  } catch (e) {}
+  // Apply loaded config
+  musicUrlCache.updateConfig({ maxEntries: cacheConfig.urlMax, ttl: cacheConfig.urlTtlMinutes * 60 * 1000 });
+  lyricCache.updateConfig({ maxEntries: cacheConfig.lyricMax, ttl: cacheConfig.lyricTtlDays * 24 * 60 * 60 * 1000 });
+  crossSourceCache.updateConfig({ maxEntries: cacheConfig.crossMax, ttl: cacheConfig.crossTtlMinutes * 60 * 1000 });
+})();
+
+function _saveCacheConfig() {
+  try {
+    var state = {};
+    if (fs.existsSync(STATE_FILE)) {
+      try { state = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')); } catch (e) {}
+    }
+    state.cacheConfig = cacheConfig;
+    fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2), 'utf8');
+  } catch (e) {
+    console.error('[lx-engine] Failed to save cache config:', e.message);
+  }
+}
+
+function _cacheKey(source, songId, type) {
+  return source + ':' + songId + ':' + (type || 'default');
+}
+
 function handleAction(action, source, info) {
   return new Promise(function(resolve, reject) {
     var settled = false;
-    // Hard timeout: always reject after 20s regardless of internal state
+    // Hard timeout: always reject after 12s regardless of internal state
     var hardTimer = setTimeout(function() {
       if (!settled) { settled = true; reject(new Error('Source script request timed out (hard timeout)')); }
-    }, 20000);
+    }, 12000);
 
     function safeResolve(data) { if (!settled) { settled = true; clearTimeout(hardTimer); resolve(data); } }
     function safeReject(err) { if (!settled) { settled = true; clearTimeout(hardTimer); reject(err); } }
+
+    // Check musicUrl cache (skip if info requests a refresh)
+    if (action === 'musicUrl' && !(info && info.isRefresh)) {
+      var cacheKey = _cacheKey(source, (info && info.musicInfo && info.musicInfo.songmid) || '', (info && info.type) || '');
+      var cached = cacheKey ? musicUrlCache.get(cacheKey) : null;
+      if (cached) {
+        // Validate cached URL looks like an HTTP URL
+        if (typeof cached === 'string' && /^https?:\/\//i.test(cached)) {
+          console.log('[lx-engine] musicUrl cache hit:', cacheKey);
+          return safeResolve(cached);
+        }
+        // Invalid cached data → evict
+        musicUrlCache.delete(cacheKey);
+      }
+    }
 
     var active = getActiveSource();
     if (!active) return safeReject(new Error('No active LX source'));
@@ -543,19 +807,37 @@ function handleAction(action, source, info) {
       return safeReject(new Error('Action "' + action + '" not supported for source "' + source + '"'));
     }
 
-    // If no handler registered, try reloading the active source first (race recovery)
     if (!lxStore.handlers['request'] || !lxStore.handlers['request'].length) {
       console.log('[lx-engine] No handler registered, reloading active source...');
       _reloadActiveSource().then(function() {
-        doHandle(action, source, info, safeResolve, safeReject);
+        doHandleAndCache(action, source, info, safeResolve, safeReject);
       }).catch(function(err) {
         safeReject(new Error('Failed to reload source: ' + err.message));
       });
       return;
     }
 
-    doHandle(action, source, info, safeResolve, safeReject);
+    doHandleAndCache(action, source, info, safeResolve, safeReject);
   });
+}
+
+function doHandleAndCache(action, source, info, resolve, reject) {
+  var origResolve = function(data) {
+    // Cache successful musicUrl results
+    if (action === 'musicUrl' && data && !(info && info.isRefresh)) {
+      var cacheKey = _cacheKey(source, (info && info.musicInfo && info.musicInfo.songmid) || '', (info && info.type) || '');
+      if (cacheKey && typeof data === 'string' && /^https?:\/\//i.test(data)) {
+        musicUrlCache.set(cacheKey, data);
+      }
+    }
+    // If isRefresh=true and old URL was bad, increment failCount on old key
+    if (action === 'musicUrl' && info && info.isRefresh) {
+      var oldKey = _cacheKey(source, (info && info.musicInfo && info.musicInfo.songmid) || '', (info && info.type) || '');
+      if (oldKey) musicUrlCache.markFailed(oldKey);
+    }
+    resolve(data);
+  };
+  doHandle(action, source, info, origResolve, reject);
 }
 
 function doHandle(action, source, info, resolve, reject) {
@@ -565,7 +847,7 @@ function doHandle(action, source, info, resolve, reject) {
     var handled = false;
     var timeout = setTimeout(function() {
       if (!handled) { handled = true; reject(new Error('Source script request timed out')); }
-    }, 15000);
+    }, 10000);
 
     try {
       var result = handlers[0]({ action: action, source: source, info: info });
@@ -622,4 +904,66 @@ module.exports = {
   handleAction: handleAction,
   removeSource: removeSource,
   refreshSource: refreshSource,
+  // Cache management
+  getCacheStats: function() {
+    return {
+      url: musicUrlCache.stats(),
+      lyric: lyricCache.stats(),
+      crossSource: crossSourceCache.stats(),
+    };
+  },
+  clearCache: function(type) {
+    var cleared = 0;
+    if (type === 'url' || type === 'all') {
+      cleared += musicUrlCache.stats().count;
+      musicUrlCache.clear();
+    }
+    if (type === 'lyric' || type === 'all') {
+      cleared += lyricCache.stats().count;
+      lyricCache.clear();
+    }
+    if (type === 'crossSource' || type === 'all') {
+      cleared += crossSourceCache.stats().count;
+      crossSourceCache.clear();
+    }
+    return cleared;
+  },
+  getCacheConfig: function() {
+    return {
+      urlMax: cacheConfig.urlMax,
+      urlTtlMinutes: cacheConfig.urlTtlMinutes,
+      lyricMax: cacheConfig.lyricMax,
+      lyricTtlDays: cacheConfig.lyricTtlDays,
+      crossMax: cacheConfig.crossMax,
+      crossTtlMinutes: cacheConfig.crossTtlMinutes,
+    };
+  },
+  updateCacheConfig: function(newConfig) {
+    if (newConfig.urlMax != null) cacheConfig.urlMax = newConfig.urlMax;
+    if (newConfig.urlTtlMinutes != null) cacheConfig.urlTtlMinutes = newConfig.urlTtlMinutes;
+    if (newConfig.lyricMax != null) cacheConfig.lyricMax = newConfig.lyricMax;
+    if (newConfig.lyricTtlDays != null) cacheConfig.lyricTtlDays = newConfig.lyricTtlDays;
+    if (newConfig.crossMax != null) cacheConfig.crossMax = newConfig.crossMax;
+    if (newConfig.crossTtlMinutes != null) cacheConfig.crossTtlMinutes = newConfig.crossTtlMinutes;
+    musicUrlCache.updateConfig({ maxEntries: cacheConfig.urlMax, ttl: cacheConfig.urlTtlMinutes * 60 * 1000 });
+    lyricCache.updateConfig({ maxEntries: cacheConfig.lyricMax, ttl: cacheConfig.lyricTtlDays * 24 * 60 * 60 * 1000 });
+    crossSourceCache.updateConfig({ maxEntries: cacheConfig.crossMax, ttl: cacheConfig.crossTtlMinutes * 60 * 1000 });
+    _saveCacheConfig();
+    return true;
+  },
+  // Public cache keys for use by server.js when proxying lyrics
+  getCachedLyric: function(source, songId) {
+    return lyricCache.get(source + ':' + songId + ':lyric');
+  },
+  setCachedLyric: function(source, songId, lyricText) {
+    if (lyricText && LYRIC_TIMESTAMP_RE.test(lyricText)) {
+      lyricCache.set(source + ':' + songId + ':lyric', lyricText);
+    }
+  },
+  getCachedCrossSource: function(source, songId) {
+    return crossSourceCache.get(source + ':' + songId + ':cross');
+  },
+  setCachedCrossSource: function(source, songId, data) {
+    crossSourceCache.set(source + ':' + songId + ':cross', data);
+  },
 };
