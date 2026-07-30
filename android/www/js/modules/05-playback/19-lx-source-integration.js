@@ -1419,10 +1419,10 @@ function escHtmlLx(str) {
           var qqId = song.qqId || (/^\d+$/.test(String(song.id || '')) ? song.id : '');
           return '/api/qq/lyric?mid=' + encodeURIComponent(mid) + '&id=' + encodeURIComponent(qqId);
           }
-        if (src === 'wy') return '/api/lyric?id=' + encodeURIComponent(song.id || song.songmid || '');
-        if (src === 'mg') return '/api/lyric?id=' + encodeURIComponent(song.copyrightId || song.id || '');
+        if (src === 'wy') return '/api/lyric?id=' + encodeURIComponent(song.id || song.songmid || '') + '&source=wy';
+        if (src === 'mg') return '/api/lyric?id=' + encodeURIComponent(song.copyrightId || song.id || '') + '&source=mg';
         // 兜底：用歌名歌手去网易云搜索
-        return '/api/lyric?id=' + encodeURIComponent(song.id || song.songmid || '');
+        return '/api/lyric?id=' + encodeURIComponent(song.id || song.songmid || '') + '&source=' + encodeURIComponent(src || '');
         }
       return _origLyricEndpointForSong(songOrId);
     };

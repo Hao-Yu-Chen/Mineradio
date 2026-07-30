@@ -6362,7 +6362,12 @@ const server = http.createServer(async (req, res) => {
       const mid = url.searchParams.get('mid') || url.searchParams.get('songmid') || '';
       const id = url.searchParams.get('id') || url.searchParams.get('qqId') || '';
       if (!mid && !id) { sendJSON(res, { provider: 'qq', error: 'Missing QQ song mid or id', lyric: '' }, 400); return; }
+      // LX 缓存优先
+      var qqCacheKey = mid || id;
+      var qqCachedLyric = lxEngine.getCachedLyric('tx', qqCacheKey);
+      if (qqCachedLyric) { console.log('[QQ Lyric] cache hit'); sendJSON(res, { provider: 'qq', lyric: qqCachedLyric }); return; }
       const data = await handleQQLyric(mid, id);
+      if (data && data.lyric) lxEngine.setCachedLyric('tx', qqCacheKey, data.lyric);
       sendJSON(res, data);
     } catch (err) {
       console.error('[QQLyric]', err);
@@ -7044,7 +7049,13 @@ const server = http.createServer(async (req, res) => {
   if (pn === '/api/lyric') {
     try {
       const id = url.searchParams.get('id');
+      const lxSrc = url.searchParams.get('source') || '';
       if (!id) { sendJSON(res, { error: 'Missing song id', lyric: '' }, 400); return; }
+      // LX 缓存优先（仅 LX 源请求带 source 参数）
+      if (lxSrc) {
+        var lyCached = lxEngine.getCachedLyric(lxSrc, id);
+        if (lyCached) { console.log('[Lyric] LX cache hit source=' + lxSrc); sendJSON(res, { lyric: lyCached, tlyric: '', source: 'lx_cache' }); return; }
+      }
       let body = {};
       let source = 'lyric';
       try {
@@ -7061,8 +7072,10 @@ const server = http.createServer(async (req, res) => {
         body = mergeLyricBodies(body, r.body || {});
         source = source === 'lyric_new' ? 'lyric_new+lyric' : 'lyric';
       }
+      var lyResult = (body.lrc && body.lrc.lyric) || '';
+      if (lxSrc && lyResult) lxEngine.setCachedLyric(lxSrc, id, lyResult);
       sendJSON(res, {
-        lyric: (body.lrc && body.lrc.lyric) || '',
+        lyric: lyResult,
         tlyric: (body.tlyric && body.tlyric.lyric) || '',
         yrc: (body.yrc && body.yrc.lyric) || '',
         ytlrc: (body.ytlrc && body.ytlrc.lyric) || '',
@@ -7083,6 +7096,9 @@ const server = http.createServer(async (req, res) => {
       var kwLyricId = url.searchParams.get('id') || '';
       console.log('[KW Lyric] Request id=' + kwLyricId);
       if (!kwLyricId) { sendJSON(res, { lyric: '', tlyric: '' }); return; }
+      // LX 缓存优先
+      var kwCachedLyric = lxEngine.getCachedLyric('kw', kwLyricId);
+      if (kwCachedLyric) { console.log('[KW Lyric] cache hit'); sendJSON(res, { lyric: kwCachedLyric, tlyric: '' }); return; }
       // Inline fetch — simple HTTPS API, no zlib/XOR
       var kwUrl = 'https://m.kuwo.cn/newh5/singles/songinfoandlrc?musicId=' + encodeURIComponent(kwLyricId);
       var kwLyricAc = new AbortController();
@@ -7125,7 +7141,9 @@ const server = http.createServer(async (req, res) => {
         var ts = (m < 10 ? '0' + m : m) + ':' + (sec < 10 ? '0' + sec : sec);
         return '[' + ts + ']' + (item.lineLyric || '');
       });
-      sendJSON(res, { lyric: kwLines.join('\n'), tlyric: '' });
+      var kwLyricText = kwLines.join('\n');
+      if (kwLyricText) lxEngine.setCachedLyric('kw', kwLyricId, kwLyricText);
+      sendJSON(res, { lyric: kwLyricText, tlyric: '' });
     } catch (err) {
       console.error('[KW Lyric]', err.message);
       sendJSON(res, { lyric: '', tlyric: '' });
@@ -7140,6 +7158,10 @@ const server = http.createServer(async (req, res) => {
       var kgLyricHash = url.searchParams.get('hash') || '';
       var kgLyricTime = url.searchParams.get('time') || '300';
       if (!kgLyricName && !kgLyricHash) { sendJSON(res, { lyric: '', tlyric: '' }); return; }
+      // LX 缓存优先
+      var kgCacheKey = kgLyricHash || kgLyricName;
+      var kgCachedLyric = lxEngine.getCachedLyric('kg', kgCacheKey);
+      if (kgCachedLyric) { console.log('[KG Lyric] cache hit'); sendJSON(res, { lyric: kgCachedLyric, tlyric: '' }); return; }
       var kgLyricUrl = 'http://m.kugou.com/app/i/krc.php?cmd=100&keyword=' + encodeURIComponent(kgLyricName) +
         '&hash=' + encodeURIComponent(kgLyricHash) + '&timelength=' + encodeURIComponent(kgLyricTime) + '&d=0.38664927426725626';
       var kgAc = new AbortController();
@@ -7157,6 +7179,7 @@ const server = http.createServer(async (req, res) => {
       }
       clearTimeout(kgTimer);
       var kgLyricText = await kgLyricResp.text();
+      if (kgLyricText && !/^\[ti:|^\s*$/.test(kgLyricText)) lxEngine.setCachedLyric('kg', kgCacheKey, kgLyricText);
       sendJSON(res, { lyric: kgLyricText || '', tlyric: '' });
     } catch (err) {
       console.error('[KG Lyric]', err.message);
