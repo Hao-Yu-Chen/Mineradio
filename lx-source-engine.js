@@ -732,26 +732,29 @@ var LYRIC_TIMESTAMP_RE = /\[\d{1,2}:.*\d{1,4}\]/;
 // ============================================================
 var CACHE_DIR = SOURCES_DIR;
 
+// 永不过期 — 依靠 failCount ≥3 自动清除失效缓存并重新拉取
+var NEVER_TTL = Number.MAX_SAFE_INTEGER;
+
 var musicUrlCache = createCacheStore({
-  name: 'url', maxEntries: 300, ttl: 30 * 60 * 1000,
+  name: 'url', maxEntries: 300, ttl: NEVER_TTL,
   filePath: path.join(CACHE_DIR, 'url_cache.json'),
 });
 
 var lyricCache = createCacheStore({
-  name: 'lyric', maxEntries: 500, ttl: 7 * 24 * 60 * 60 * 1000,
+  name: 'lyric', maxEntries: 500, ttl: NEVER_TTL,
   filePath: path.join(CACHE_DIR, 'lyric_cache.json'),
 });
 
 var crossSourceCache = createCacheStore({
-  name: 'cross', maxEntries: 150, ttl: 60 * 60 * 1000,
+  name: 'cross', maxEntries: 150, ttl: NEVER_TTL,
   // memory-only (no filePath)
 });
 
-// Default config
+// Default config (TTL 值仅作展示，实际使用永不限制)
 var cacheConfig = {
-  urlMax: 300, urlTtlMinutes: 30,
-  lyricMax: 500, lyricTtlDays: 7,
-  crossMax: 150, crossTtlMinutes: 60,
+  urlMax: 300, urlTtlMinutes: 0,
+  lyricMax: 500, lyricTtlDays: 0,
+  crossMax: 150, crossTtlMinutes: 0,
 };
 
 // Load config overrides from state file
@@ -978,9 +981,13 @@ module.exports = {
     if (newConfig.lyricTtlDays != null) cacheConfig.lyricTtlDays = newConfig.lyricTtlDays;
     if (newConfig.crossMax != null) cacheConfig.crossMax = newConfig.crossMax;
     if (newConfig.crossTtlMinutes != null) cacheConfig.crossTtlMinutes = newConfig.crossTtlMinutes;
-    musicUrlCache.updateConfig({ maxEntries: cacheConfig.urlMax, ttl: cacheConfig.urlTtlMinutes * 60 * 1000 });
-    lyricCache.updateConfig({ maxEntries: cacheConfig.lyricMax, ttl: cacheConfig.lyricTtlDays * 24 * 60 * 60 * 1000 });
-    crossSourceCache.updateConfig({ maxEntries: cacheConfig.crossMax, ttl: cacheConfig.crossTtlMinutes * 60 * 1000 });
+    // TTL=0 表示永不过期，避免乘以0
+    var urlTtl = cacheConfig.urlTtlMinutes > 0 ? cacheConfig.urlTtlMinutes * 60 * 1000 : NEVER_TTL;
+    var lyricTtl = cacheConfig.lyricTtlDays > 0 ? cacheConfig.lyricTtlDays * 24 * 60 * 60 * 1000 : NEVER_TTL;
+    var crossTtl = cacheConfig.crossTtlMinutes > 0 ? cacheConfig.crossTtlMinutes * 60 * 1000 : NEVER_TTL;
+    musicUrlCache.updateConfig({ maxEntries: cacheConfig.urlMax, ttl: urlTtl });
+    lyricCache.updateConfig({ maxEntries: cacheConfig.lyricMax, ttl: lyricTtl });
+    crossSourceCache.updateConfig({ maxEntries: cacheConfig.crossMax, ttl: crossTtl });
     _saveCacheConfig();
     return true;
   },
