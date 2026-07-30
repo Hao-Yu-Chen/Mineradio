@@ -260,9 +260,13 @@ if not exist "www\nodejs-project\server.js" (
     copy "..\lx-source-engine.js" "www\nodejs-project\" >nul
     copy "..\lx-search.js" "www\nodejs-project\" >nul
     copy "..\dj-analyzer.js" "www\nodejs-project\" >nul
+    if exist "..\lx-playlist.js" copy "..\lx-playlist.js" "www\nodejs-project\" >nul 2>nul
     if exist "..\ncm-wrapper.js" copy "..\ncm-wrapper.js" "www\nodejs-project\" >nul 2>nul
     echo   Done
 )
+
+:: Always sync dependent modules (even if server.js already exists)
+if exist "..\lx-playlist.js" copy "..\lx-playlist.js" "www\nodejs-project\" >nul 2>nul
 
 :: ---- Step 3: npm install ----
 echo [3/5] Installing Capacitor dependencies...

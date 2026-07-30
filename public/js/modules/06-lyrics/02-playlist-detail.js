@@ -620,13 +620,15 @@ function bindPlaylistPanelLazyRender() {
       scheduleQueuePanelVirtualRender();
       maybeRequestPlaylistQueuePageFromScroller(panel);
     }
-    if (queueViewTab === 'playlists') {
+    if (queueViewTab === 'playlists' && !(typeof fx !== 'undefined' && fx && fx.lxSourceEnabled)) {
       schedulePlaylistPanelVirtualRender();
       maybeGrowPlaylistPanelDetailRenderLimit();
     }
   }, { passive: true });
 }
 function renderUserPlaylistsList(opts) {
+  // LX 模式接管歌单渲染，跳过标准歌单列表写入
+  if (typeof fx !== 'undefined' && fx && fx.lxSourceEnabled) return;
   opts = opts || {};
   var $pl = document.getElementById('pl-list');
   var seq = ++playlistRenderSeq;

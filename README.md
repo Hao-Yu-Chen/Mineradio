@@ -57,6 +57,14 @@ Mineradio 2.0 重新整理了视觉层次、桌面模式、主页与搜索体验
 
 ![扩展音源](docs/screenshots/pc端落雪源配置界面.png)
 
+**LX 歌单导入 — 在线导入**
+
+![LX 歌单导入](docs/screenshots/pc端LX歌单导入.png)
+
+**LX 歌单导入 — 左侧工具栏**
+
+![LX 歌单导入工具栏](docs/screenshots/pc端LX歌单导入工具栏.png)
+
 ### 移动端（Android）
 
 > **注意**：当前安卓版本仅适配**横屏**模式，竖屏布局尚未优化，请在横屏下使用以获得完整体验。
@@ -72,6 +80,10 @@ Mineradio 2.0 重新整理了视觉层次、桌面模式、主页与搜索体验
 **搜索页面**
 
 ![Android 搜索](docs/screenshots/android端搜索页面.png)
+
+**LX 歌单导入**
+
+![Android LX 歌单导入](docs/screenshots/android端LX歌单导入.png)
 
 ---
 
@@ -94,6 +106,7 @@ Mineradio 2.0 重新整理了视觉层次、桌面模式、主页与搜索体验
 - 右键唤起 3D 歌单架，支持歌单队列浏览
 - **多音源搜索播放** — 支持网易云、QQ 音乐、LX Music 扩展音源等多种音源接入
 - **可扩展音源系统** — 插件式架构，支持自定义音源扩展（兼容 LX Music 音源格式）
+- **LX 歌单导入** — 支持多平台歌单链接一键导入（WY/TX/KG/KW/MG），本地 JSON 文件导入，歌单导出为 playListPart_v2 格式
 - **Open-Meteo 天气电台** — 根据天气 mood 生成播放队列
 - **粒子视觉** — 封面粒子系统，节奏驱动电影镜头，空场星空壁纸
 - **DIY 视觉控制台** — 实时调节粒子、着色、歌单架、性能等参数
@@ -129,6 +142,7 @@ resources/app/
 ├── server.js                     # 本地 HTTP API 服务
 ├── lx-search.js                  # LX 模式搜索实现
 ├── lx-source-engine.js           # LX 音源 VM 沙箱引擎
+├── lx-playlist.js                # LX 歌单导入引擎（多平台）
 ├── dj-analyzer.js                # 节奏/音频分析引擎
 ├── android/                      # Android Capacitor 项目
 │   ├── www/mobile-bridge.js      # 移动端 API 路由补丁

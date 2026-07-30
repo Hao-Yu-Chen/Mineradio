@@ -124,7 +124,11 @@ if [ ! -f "$NODE_DIR/server.js" ]; then
     cp ../lx-source-engine.js "$NODE_DIR/"
     cp ../lx-search.js "$NODE_DIR/"
     cp ../dj-analyzer.js "$NODE_DIR/"
+    if [ -f "../lx-playlist.js" ]; then cp ../lx-playlist.js "$NODE_DIR/"; fi
 fi
+
+# Always sync dependent modules (even if server.js already exists)
+if [ -f "../lx-playlist.js" ]; then cp ../lx-playlist.js "$NODE_DIR/"; fi
 
 # Install Node.js dependencies if needed
 if [ ! -d "$NODE_DIR/node_modules" ]; then

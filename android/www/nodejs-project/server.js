@@ -55,6 +55,7 @@ const { fileURLToPath } = require('url');
 const { analyzePodcastDjStream, analyzePodcastDjIntro } = require('./dj-analyzer');
 const lxEngine = require('./lx-source-engine');
 const lxSearch = require('./lx-search');
+const lxPlaylist = require('./lx-playlist');
 
 // Map Mineradio quality names (hires/lossless/exhigh/standard) to LX source quality names
 // LX sources use simple bitrate labels like '128k', '320k', 'flac', 'flac24bit'
@@ -4515,6 +4516,40 @@ const server = http.createServer(async (req, res) => {
       sendJSON(res, { ok: true });
     } catch (err) {
       console.error('[LX Delete]', err.message);
+      sendJSON(res, { ok: false, error: err.message }, 500);
+    }
+    return;
+  }
+
+  // ---------- LX 歌单导入/导出 ----------
+
+  if (pn === '/api/lx/playlist/fetch' && req.method === 'POST') {
+    try {
+      var plBody = await readRequestBody(req);
+      var plInput = (plBody && plBody.input) || '';
+      var plPlatform = (plBody && plBody.platform) || 'auto';
+      var plResult = await lxPlaylist.fetchPlaylist(plInput, plPlatform);
+      if (plResult.ok) {
+        sendJSON(res, plResult);
+      } else {
+        sendJSON(res, plResult, 400);
+      }
+    } catch (err) {
+      console.error('[LX Playlist Fetch]', err.message);
+      sendJSON(res, { ok: false, error: err.message }, 500);
+    }
+    return;
+  }
+
+  if (pn === '/api/lx/playlist/import-local' && req.method === 'POST') {
+    try {
+      var localBody = await readRequestBody(req);
+      var localFilePath = (localBody && localBody.filePath) || '';
+      var localResult = lxPlaylist.readLocalFile(localFilePath);
+      sendJSON(res, { ok: true, name: localResult.name, songs: localResult.songs,
+        total: localResult.songs.length });
+    } catch (err) {
+      console.error('[LX Playlist ImportLocal]', err.message);
       sendJSON(res, { ok: false, error: err.message }, 500);
     }
     return;

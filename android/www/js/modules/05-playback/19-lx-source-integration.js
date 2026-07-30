@@ -2,6 +2,11 @@
 // 本模块提供 LX 音源管理、搜索集成、歌单系统、喜欢/收藏功能
 // 通过 monkey-patching 接入新模块化架构
 
+// --- 触屏检测 (Android/移动端常驻按钮) ---
+var _lxIsTouch = (typeof window.desktopWindow !== 'undefined' && window.desktopWindow.isMobile) ||
+  /Android|iPhone|iPad|iPod|webOS/i.test(navigator.userAgent);
+var _lxSongEditMode = false; // 触屏下编辑模式开关
+
 // --- LX 状态扩展 fxDefaults ---
 if (typeof fxDefaults === 'object') {
   if (!('lxSourceEnabled' in fxDefaults)) fxDefaults.lxSourceEnabled = false;
@@ -232,6 +237,8 @@ function updateLxLocalCounts() {
 // --- LX 歌单 sidebar ---
 var lxSidebarExpanded = null;
 
+var _lxOriginalPlToolbarHTML = null;
+
 function renderLxSidebar() {
   var plTab = document.getElementById('tab-pl');
   var podcastTab = document.getElementById('tab-podcast');
@@ -241,54 +248,117 @@ function renderLxSidebar() {
     if (podcastTab) podcastTab.style.display = 'none';
     var pp = document.getElementById('podcast-pane');
     if (pp) pp.style.display = 'none';
+    // 替换歌单工具栏为导入按钮
+    _renderLxPlToolbar();
   } else {
     if (plTab) plTab.textContent = '我的歌单';
     if (podcastTab) podcastTab.style.display = '';
+    // 恢复原始工具栏
+    _restoreLxPlToolbar();
     }
   if (typeof queueViewTab !== 'undefined' && queueViewTab === 'playlists' && fx.lxSourceEnabled) renderLxSidebarPlaylists();
   }
 
+function _renderLxPlToolbar() {
+  var toolbar = document.querySelector('#pl-pane > .queue-toolbar');
+  if (!toolbar) return;
+  // 保存原始HTML
+  if (_lxOriginalPlToolbarHTML === null) {
+    _lxOriginalPlToolbarHTML = toolbar.innerHTML;
+  }
+  toolbar.innerHTML = '' +
+    '<div class="queue-chip">LX 歌单</div>' +
+    '<div style="display:flex;gap:6px">' +
+      '<button class="fx-mini-btn ghost" onclick="showLxPlaylistImportModal()" style="height:26px;padding:0 10px;font-size:11px">导入歌单</button>' +
+      '<button class="fx-mini-btn ghost" onclick="showLxLocalImportPicker()" style="height:26px;padding:0 10px;font-size:11px">本地导入</button>' +
+    '</div>';
+}
+
+function _restoreLxPlToolbar() {
+  if (_lxOriginalPlToolbarHTML === null) return;
+  var toolbar = document.querySelector('#pl-pane > .queue-toolbar');
+  if (toolbar) {
+    toolbar.innerHTML = _lxOriginalPlToolbarHTML;
+  }
+}
+
 function toggleLxSidebarExpand(id) {
   lxSidebarExpanded = lxSidebarExpanded === id ? null : id;
+  _lxSongEditMode = false;
+  renderLxSidebarPlaylists();
+  }
+
+function toggleLxSongEditMode() {
+  _lxSongEditMode = !_lxSongEditMode;
   renderLxSidebarPlaylists();
   }
 
 function renderLxSidebarPlaylists() {
   var plList = document.getElementById('pl-list');
   if (!plList) return;
+
+  var expandedId = lxSidebarExpanded;
+  var expandedPl = null;
+  if (expandedId) {
+    for (var i = 0; i < lxPlaylists.length; i++) {
+      if (lxPlaylists[i].id === expandedId) { expandedPl = lxPlaylists[i]; break; }
+    }
+  }
+
+  // 有展开的歌单 → 全宽详情视图
+  if (expandedPl) {
+    var isFav = expandedPl.id === 'lx_fav';
+    var html = '';
+    // 返回按钮 + 歌单名称
+    html += '<div style="display:flex;align-items:center;gap:8px;padding:10px 0;margin-bottom:4px">' +
+      '<button style="flex-shrink:0;padding:4px 8px;border-radius:5px;border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.05);color:rgba(255,255,255,0.5);cursor:pointer;font-size:11px" onclick="event.stopPropagation();toggleLxSidebarExpand(\'' + expandedPl.id + '\')">← 返回</button>' +
+      '<div style="flex:1;min-width:0"><div style="font-size:14px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + (isFav ? '❤ ' : '📋 ') + escapeHTML(expandedPl.name) + '</div>' +
+      '<div style="font-size:10px;color:rgba(255,255,255,0.35)">' + expandedPl.songs.length + ' 首</div></div>' +
+      '</div>';
+    // 操作按钮行
+    var editBtnHtml = _lxIsTouch
+      ? '<button style="padding:7px 8px;border-radius:6px;border:1px solid ' + (_lxSongEditMode ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.08)') + ';background:' + (_lxSongEditMode ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.03)') + ';color:' + (_lxSongEditMode ? '#fff' : 'rgba(255,255,255,0.4)') + ';font-size:10px;cursor:pointer;flex-shrink:0;transition:all .2s" onclick="event.stopPropagation();toggleLxSongEditMode()">' + (_lxSongEditMode ? '✓ 完成' : '✎ 编辑') + '</button>'
+      : '';
+    html += '<div style="display:flex;gap:6px;margin-bottom:8px">' +
+      '<button style="flex:1;padding:7px;border-radius:6px;border:1px solid rgba(255,255,255,0.14);background:rgba(255,255,255,0.07);color:#fff;cursor:pointer;font-size:11px" onclick="event.stopPropagation();playLxPlaylist(\'' + expandedPl.id + '\')">▶ 播放全部</button>' +
+      '<button style="padding:7px 10px;border-radius:6px;border:1px solid rgba(255,255,255,0.08);background:rgba(255,255,255,0.03);color:rgba(255,255,255,0.4);font-size:10px;cursor:pointer;flex-shrink:0" onclick="event.stopPropagation();exportLxPlaylist(\'' + expandedPl.id + '\')" title="导出歌单">⬇ 导出</button>' +
+      (isFav ? '' : '<button style="padding:7px 10px;border-radius:6px;border:1px solid ' + (_lxIsTouch ? 'rgba(255,80,60,.22)' : 'rgba(255,255,255,0.08)') + ';background:' + (_lxIsTouch ? 'rgba(255,80,60,.12)' : 'rgba(255,255,255,0.03)') + ';color:' + (_lxIsTouch ? '#ff7060' : 'rgba(255,255,255,0.3)') + ';font-size:10px;cursor:pointer;transition:all .2s;flex-shrink:0" onclick="event.stopPropagation();removeLxPlaylist(\'' + expandedPl.id + '\')" title="删除歌单"' + (_lxIsTouch ? '' : ' onmouseenter="this.style.background=\'rgba(255,80,60,.15)\';this.style.color=\'#ff7060\';this.style.borderColor=\'rgba(255,80,60,.25)\'" onmouseleave="this.style.background=\'rgba(255,255,255,0.03)\';this.style.color=\'rgba(255,255,255,0.3)\';this.style.borderColor=\'rgba(255,255,255,0.08)\'"') + '>× 删除</button>') +
+      editBtnHtml +
+      '</div>';
+    // 歌曲列表 — 占据全宽，滚动
+    if (!expandedPl.songs.length) {
+      html += '<div style="color:rgba(255,255,255,0.25);text-align:center;padding:32px 0;font-size:12px">暂无歌曲</div>';
+    } else {
+      html += '<div style="border-top:1px solid rgba(255,255,255,0.05);overflow-y:auto;max-height:calc(100vh - 280px);scrollbar-width:thin;scrollbar-color:rgba(255,255,255,0.08) transparent" onwheel="event.stopPropagation()">';
+      for (var j = 0; j < expandedPl.songs.length; j++) {
+        var s = expandedPl.songs[j];
+        var artistName = (s.artist || s.singer || '');
+        var firstArtist = artistName.split(',')[0].split('、')[0].trim();
+        html += '<div class="lx-song-row" style="display:flex;align-items:center;gap:8px;padding:7px 6px;cursor:pointer;font-size:12px;border-bottom:1px solid rgba(255,255,255,0.03)' + (_lxIsTouch ? ';background:rgba(255,255,255,0.02)' : '') + '" onclick="event.stopPropagation();playLxPlaylistSong(\'' + expandedPl.id + '\',' + j + ')"' + (_lxIsTouch ? ' data-touch="1"' : ' onmouseenter="this.style.background=\'rgba(255,255,255,0.05)\'" onmouseleave="this.style.background=\'transparent\'"') + '>' +
+          '<span style="color:rgba(255,255,255,0.2);min-width:22px;text-align:right;font-size:10px;flex-shrink:0">' + (j + 1) + '</span>' +
+          '<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escapeHTML(s.name || '未知歌曲') + '</span>' +
+          '<span style="color:rgba(255,255,255,0.25);font-size:10px;max-width:64px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex-shrink:0;text-align:right" title="' + escapeHTML(artistName) + '">' + escapeHTML(firstArtist) + '</span>' +
+          (_lxIsTouch && !_lxSongEditMode ? '' :
+            '<button class="lx-song-del" style="flex-shrink:0;width:' + (_lxIsTouch ? '22px' : '18px') + ';height:' + (_lxIsTouch ? '22px' : '18px') + ';border-radius:50%;border:1px solid ' + (_lxIsTouch ? 'rgba(255,90,70,0.5)' : 'rgba(255,255,255,0.06)') + ';background:' + (_lxIsTouch ? 'rgba(255,70,50,0.2)' : 'transparent') + ';color:' + (_lxIsTouch ? '#ff6b5b' : 'rgba(255,255,255,0.18)') + ';font-size:' + (_lxIsTouch ? '12px' : '10px') + ';cursor:pointer;line-height:1;padding:0;font-weight:bold" onclick="event.stopPropagation();removeLxPlaylistSong(\'' + expandedPl.id + '\',' + j + ')" title="移除"' + (_lxIsTouch ? '' : ' onmouseenter="this.style.background=\'rgba(255,80,60,.2)\';this.style.color=\'#ff7060\';this.style.borderColor=\'rgba(255,80,60,.3)\'" onmouseleave="this.style.background=\'transparent\';this.style.color=\'rgba(255,255,255,0.18)\';this.style.borderColor=\'rgba(255,255,255,0.06)\'"') + '>×</button>') +
+          '</div>';
+      }
+      html += '</div>';
+    }
+    plList.innerHTML = html;
+    return;
+  }
+
+  // 无展开歌单 → 卡片列表视图
   var html = '';
   for (var i = 0; i < lxPlaylists.length; i++) {
     var pl = lxPlaylists[i];
     var isFav = pl.id === 'lx_fav';
-    var expanded = lxSidebarExpanded === pl.id;
-    html += '<div class="pl-card" style="margin:6px 0;border-radius:10px;cursor:pointer;background:' + (isFav ? 'rgba(255,122,144,0.06)' : 'rgba(255,255,255,0.03)') + ';border:1px solid ' + (isFav ? 'rgba(255,122,144,0.18)' : 'rgba(255,255,255,0.06)') + '" onclick="toggleLxSidebarExpand(\'' + pl.id + '\')">';
-    html += '<div style="padding:12px;display:flex;align-items:center;gap:10px">' +
-      '<div style="font-size:' + (isFav ? '18' : '14') + 'px">' + (isFav ? '❤' : '📋') + '</div>' +
-      '<div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escapeHTML(pl.name) + '</div>' +
-      '<div style="font-size:11px;color:rgba(255,255,255,0.4);margin-top:2px">' + pl.songs.length + ' 首' + (expanded ? ' ▲' : ' ▼') + '</div></div>' +
-      '</div>';
-    if (expanded) {
-      html += '<div style="padding:0 12px 8px">';
-      html += '<div style="display:flex;gap:6px;margin-bottom:6px">' +
-        '<button style="flex:1;padding:6px;border-radius:6px;border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.06);color:#fff;cursor:pointer;font-size:11px" onclick="event.stopPropagation();playLxPlaylist(\'' + pl.id + '\')">▶ 播放全部</button>' +
-        (isFav ? '' : '<button style="padding:6px 10px;border-radius:6px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.03);color:rgba(255,255,255,.3);font-size:10px;cursor:pointer;transition:all .2s;flex-shrink:0" onclick="event.stopPropagation();removeLxPlaylist(\'' + pl.id + '\')" title="删除歌单" onmouseenter="this.style.background=\'rgba(255,80,60,.15)\';this.style.color=\'#ff7060\';this.style.borderColor=\'rgba(255,80,60,.25)\'" onmouseleave="this.style.background=\'rgba(255,255,255,.03)\';this.style.color=\'rgba(255,255,255,.3)\';this.style.borderColor=\'rgba(255,255,255,.08)\'">删除歌单</button>') +
-        '</div>';
-      if (!pl.songs.length) {
-        html += '<div style="color:rgba(255,255,255,0.3);text-align:center;padding:8px;font-size:11px">暂无歌曲</div>';
-      } else {
-        for (var j = 0; j < pl.songs.length; j++) {
-          var s = pl.songs[j];
-          html += '<div class="lx-song-row" style="display:flex;align-items:center;gap:8px;padding:5px 8px;cursor:pointer;border-radius:4px;font-size:11px" onclick="event.stopPropagation();playLxPlaylistSong(\'' + pl.id + '\',' + j + ')" onmouseenter="this.style.background=\'rgba(255,255,255,0.05)\'" onmouseleave="this.style.background=\'transparent\'">' +
-            '<span style="color:rgba(255,255,255,0.35);min-width:18px;text-align:right">' + (j + 1) + '</span>' +
-            '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escapeHTML(s.name || '未知歌曲') + '</span>' +
-            '<span style="color:rgba(255,255,255,0.3);font-size:10px">' + escapeHTML((s.artist || '').split(',')[0] || '') + '</span>' +
-            '<button class="lx-song-del" style="flex-shrink:0;width:18px;height:18px;border-radius:50%;border:1px solid rgba(255,255,255,.08);background:transparent;color:rgba(255,255,255,.25);font-size:10px;cursor:pointer;line-height:1;padding:0;transition:all .2s" onclick="event.stopPropagation();removeLxPlaylistSong(\'' + pl.id + '\',' + j + ')" title="从歌单移除" onmouseenter="this.style.background=\'rgba(255,80,60,.2)\';this.style.color=\'#ff7060\';this.style.borderColor=\'rgba(255,80,60,.3)\'" onmouseleave="this.style.background=\'transparent\';this.style.color=\'rgba(255,255,255,.25)\';this.style.borderColor=\'rgba(255,255,255,.08)\'">×</button>' +
-            '</div>';
-        }
-      }
-      html += '</div>';
-    }
-    html += '</div>';
+    html += '<div class="pl-card" style="margin:6px 0;border-radius:10px;cursor:pointer;background:' + (isFav ? 'rgba(255,122,144,0.06)' : 'rgba(255,255,255,0.03)') + ';border:1px solid ' + (isFav ? 'rgba(255,122,144,0.18)' : 'rgba(255,255,255,0.06)') + '" onclick="toggleLxSidebarExpand(\'' + pl.id + '\')">' +
+      '<div style="padding:12px;display:flex;align-items:center;gap:10px">' +
+        '<div style="font-size:' + (isFav ? '18' : '14') + 'px;flex-shrink:0">' + (isFav ? '❤' : '📋') + '</div>' +
+        '<div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escapeHTML(pl.name) + '</div>' +
+        '<div style="font-size:11px;color:rgba(255,255,255,0.35);margin-top:2px">' + pl.songs.length + ' 首 ▼</div></div>' +
+      '</div></div>';
   }
   plList.innerHTML = html;
 }
@@ -297,6 +367,228 @@ function escapeHTML(str) {
   if (!str) return '';
   return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
+
+// --- LX 歌单导入/导出 ---
+
+var _lxFetchedPlaylist = null; // 暂存获取到的歌单数据
+
+function showLxPlaylistImportModal() {
+  var modal = document.getElementById('lx-import-playlist-modal');
+  if (!modal) return;
+  if (typeof openGsapModal === 'function') { openGsapModal(modal); }
+  else { modal.style.display = 'flex'; }
+  // 重置状态
+  var preview = document.getElementById('lx-import-preview');
+  var err = document.getElementById('lx-import-error');
+  var loading = document.getElementById('lx-import-loading');
+  var fetchBtn = document.getElementById('lx-import-fetch-btn');
+  var confirmBtn = document.getElementById('lx-import-confirm-btn');
+  if (preview) preview.style.display = 'none';
+  if (err) err.style.display = 'none';
+  if (loading) loading.style.display = 'none';
+  if (fetchBtn) fetchBtn.style.display = '';
+  if (confirmBtn) confirmBtn.style.display = 'none';
+  _lxFetchedPlaylist = null;
+  // 自动聚焦到URL输入框
+  setTimeout(function() {
+    var urlInput = document.getElementById('lx-playlist-import-url');
+    if (urlInput) { urlInput.focus(); urlInput.select(); }
+  }, 100);
+}
+
+function hideLxPlaylistImportModal() {
+  var modal = document.getElementById('lx-import-playlist-modal');
+  if (!modal) return;
+  if (typeof closeGsapModal === 'function') { closeGsapModal(modal); }
+  else { modal.style.display = 'none'; }
+  _lxFetchedPlaylist = null;
+}
+
+function _showLxImportError(msg) {
+  var err = document.getElementById('lx-import-error');
+  var loading = document.getElementById('lx-import-loading');
+  if (err) { err.textContent = msg; err.style.display = ''; }
+  if (loading) loading.style.display = 'none';
+}
+
+async function doLxPlaylistFetch() {
+  var inputEl = document.getElementById('lx-playlist-import-url');
+  var input = inputEl ? inputEl.value : '';
+  var platform = (document.getElementById('lx-import-platform') || {}).value || 'auto';
+  if (!input.trim()) { _showLxImportError('请输入歌单链接或ID'); return; }
+
+  var loading = document.getElementById('lx-import-loading');
+  var err = document.getElementById('lx-import-error');
+  var preview = document.getElementById('lx-import-preview');
+  var fetchBtn = document.getElementById('lx-import-fetch-btn');
+  var confirmBtn = document.getElementById('lx-import-confirm-btn');
+
+  if (loading) loading.style.display = '';
+  if (err) err.style.display = 'none';
+  if (preview) preview.style.display = 'none';
+  if (fetchBtn) fetchBtn.disabled = true;
+
+  try {
+    var resp = await fetch('/api/lx/playlist/fetch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ input: input.trim(), platform: platform })
+    });
+    var data = await resp.json();
+    if (loading) loading.style.display = 'none';
+    if (fetchBtn) fetchBtn.disabled = false;
+
+    if (data.ok && data.songs && data.songs.length) {
+      _lxFetchedPlaylist = data;
+      if (preview) {
+        document.getElementById('lx-import-preview-name').textContent = '歌单：' + (data.name || '未命名');
+        document.getElementById('lx-import-preview-count').textContent = '共 ' + data.songs.length + ' 首歌曲' + (data.platform ? ' · 来源：' + data.platform : '');
+        preview.style.display = '';
+      }
+      if (confirmBtn) confirmBtn.style.display = '';
+      if (fetchBtn) fetchBtn.style.display = 'none';
+    } else {
+      _showLxImportError(data.error || '获取歌单失败，请检查链接是否正确');
+    }
+  } catch (e) {
+    if (loading) loading.style.display = 'none';
+    if (fetchBtn) fetchBtn.disabled = false;
+    _showLxImportError('网络请求失败: ' + (e.message || String(e)));
+  }
+}
+
+function confirmLxPlaylistImport() {
+  if (!_lxFetchedPlaylist || !_lxFetchedPlaylist.songs || !_lxFetchedPlaylist.songs.length) {
+    _showLxImportError('没有可导入的歌曲');
+    return;
+  }
+  var name = _lxFetchedPlaylist.name || '导入歌单';
+  // 使用现有函数创建歌单
+  if (typeof createLxPlaylist === 'function') {
+    createLxPlaylist(name);
+    var pl = lxPlaylists[lxPlaylists.length - 1];
+    if (pl) {
+      for (var i = 0; i < _lxFetchedPlaylist.songs.length; i++) {
+        pl.songs.push(typeof lxStoreSong === 'function' ? lxStoreSong(_lxFetchedPlaylist.songs[i]) : _lxFetchedPlaylist.songs[i]);
+      }
+      saveLxPlaylists();
+      renderLxSidebarPlaylists();
+      if (typeof showToast === 'function') showToast('已导入 ' + _lxFetchedPlaylist.songs.length + ' 首歌曲到「' + name + '」');
+    }
+  }
+  hideLxPlaylistImportModal();
+}
+
+function exportLxPlaylist(plId) {
+  var pl = null;
+  for (var i = 0; i < lxPlaylists.length; i++) {
+    if (lxPlaylists[i].id === plId) { pl = lxPlaylists[i]; break; }
+  }
+  if (!pl) { if (typeof showToast === 'function') showToast('歌单未找到'); return; }
+
+  var songList = pl.songs.map(function(s) {
+    return {
+      name: s.name || '',
+      singer: s.singer || s.artist || '',
+      source: s.source || '',
+      songmid: s.songmid || '',
+      interval: s.interval || '',
+      albumName: s.albumName || s.album || '',
+      albumId: s.albumId || '',
+      img: s.img || s.cover || '',
+      types: s.types || [],
+      _types: s._types || {},
+      hash: s.hash || '',
+      copyrightId: s.copyrightId || ''
+    };
+  });
+
+  var exportData = {
+    type: 'playListPart_v2',
+    data: {
+      id: pl.id,
+      name: pl.name,
+      list: songList
+    }
+  };
+
+  var blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url;
+  a.download = (pl.name || 'lx_playlist').replace(/[\\/:*?"<>|]/g, '_') + '.json';
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(function() { document.body.removeChild(a); URL.revokeObjectURL(url); }, 100);
+  if (typeof showToast === 'function') showToast('歌单已导出: ' + a.download);
+}
+
+function showLxLocalImportPicker() {
+  var fileInput = document.getElementById('lx-playlist-file-input');
+  if (fileInput) { fileInput.value = ''; fileInput.click(); }
+}
+
+async function handleLxLocalFileImport(inputEl) {
+  var file = inputEl && inputEl.files && inputEl.files[0];
+  if (!file) return;
+
+  try {
+    var text = await new Promise(function(resolve, reject) {
+      var reader = new FileReader();
+      reader.onload = function() { resolve(reader.result); };
+      reader.onerror = function() { reject(new Error('无法读取文件')); };
+      reader.readAsText(file);
+    });
+
+    var data;
+    try { data = JSON.parse(text); } catch (e) {
+      if (typeof showToast === 'function') showToast('文件格式无效，无法解析JSON');
+      return;
+    }
+
+    var name = '导入歌单';
+    var songs = [];
+
+    // 兼容 playListPart_v2 格式
+    if (data.type === 'playListPart' || data.type === 'playListPart_v2') {
+      if (data.data && data.data.list) {
+        name = data.data.name || name;
+        songs = data.data.list;
+      }
+    } else if (data.songs && Array.isArray(data.songs)) {
+      // 简单格式 { name, songs }
+      name = data.name || name;
+      songs = data.songs;
+    } else if (Array.isArray(data)) {
+      // 纯数组
+      songs = data;
+    } else {
+      if (typeof showToast === 'function') showToast('不支持的文件格式');
+      return;
+    }
+
+    // 过滤有效歌曲
+    songs = songs.filter(function(s) { return s && s.name; });
+    if (!songs.length) {
+      if (typeof showToast === 'function') showToast('文件中没有有效的歌曲数据');
+      return;
+    }
+
+    // 创建歌单
+    if (typeof createLxPlaylist === 'function') {
+      createLxPlaylist(name);
+      var pl = lxPlaylists[lxPlaylists.length - 1];
+      if (pl) {
+        for (var i = 0; i < songs.length; i++) { pl.songs.push(typeof lxStoreSong === 'function' ? lxStoreSong(songs[i]) : songs[i]); }
+        saveLxPlaylists();
+        renderLxSidebarPlaylists();
+        if (typeof showToast === 'function') showToast('已导入 ' + songs.length + ' 首歌曲到「' + name + '」');
+      }
+    }
+  } catch (e) {
+    if (typeof showToast === 'function') showToast('导入失败: ' + (e.message || String(e)));
+  }
+}
 
 // --- LX 收藏弹窗 ---
 function renderLxCollectModal() {
@@ -641,6 +933,7 @@ function updateLxUI() {
           }
       updateLxLocalCounts();
       if (typeof updateSearchModeTabs === 'function') updateSearchModeTabs();
+      if (typeof renderLxSidebar === 'function') renderLxSidebar();
     });
   });
   }
@@ -1044,7 +1337,7 @@ function escHtmlLx(str) {
         if (plTab) plTab.classList.toggle('active', tab === 'playlists');
         document.getElementById('queue-pane').style.display = tab === 'queue' ? '' : 'none';
         document.getElementById('pl-pane').style.display = tab === 'playlists' ? '' : 'none';
-        if (tab === 'playlists') renderLxSidebarPlaylists();
+        if (tab === 'playlists') { renderLxSidebarPlaylists(); _renderLxPlToolbar(); }
         if (tab === 'queue' && typeof animateVisiblePanelList === 'function') animateVisiblePanelList(document.getElementById('queue-list'), '.queue-item', document.getElementById('playlist-panel'), '.queue-item.now');
         if (tab === 'playlists' && typeof animateVisiblePanelList === 'function') animateVisiblePanelList(document.getElementById('pl-list'), '.pl-card', document.getElementById('playlist-panel'));
         return;
@@ -1510,6 +1803,7 @@ function addLxHtmlElements() {
       '</div>' +
       // 源列表
       '<div id="lx-source-list" class="lx-source-list"></div>' +
+      '<input type="file" id="lx-playlist-file-input" accept=".json,.lxmc" style="display:none" onchange="handleLxLocalFileImport(this)">' +
       // 状态栏
       '<div id="lx-status-bar" class="lx-status">' +
         '<span id="lx-status-dot" class="lx-status-dot off"></span>' +
@@ -1557,7 +1851,62 @@ function addLxHtmlElements() {
     temp3.innerHTML = modalHtml;
     document.body.appendChild(temp3.firstChild);
     }
+
+  // LX 歌单在线导入弹窗
+  if (!document.getElementById('lx-import-playlist-modal')) {
+    var importModalHtml = '' +
+      '<div id="lx-import-playlist-modal" class="modal-mask" style="display:none">' +
+        '<div class="modal collect-modal" style="max-width:480px">' +
+          '<h2>导入在线歌单</h2>' +
+          '<div style="margin:10px 0;display:flex;gap:8px;align-items:center">' +
+            '<span style="font-size:12px;white-space:nowrap;color:rgba(255,255,255,0.6)">平台：</span>' +
+            '<select id="lx-import-platform" style="flex:1;padding:6px 8px;border-radius:7px;border:1px solid rgba(255,255,255,.15);background:rgba(0,0,0,.35);color:#fff;font-size:12px;font-family:inherit;outline:none">' +
+              '<option value="auto">自动检测</option>' +
+              '<option value="wy">WY</option>' +
+              '<option value="tx">TX</option>' +
+              '<option value="kg">KG</option>' +
+              '<option value="kw">KW</option>' +
+              '<option value="mg">MG</option>' +
+            '</select>' +
+          '</div>' +
+          '<div style="margin:10px 0">' +
+            '<input id="lx-playlist-import-url" type="text" placeholder="粘贴歌单链接或输入歌单ID..." style="width:100%;padding:8px;border-radius:7px;border:1px solid rgba(255,255,255,.15);background:rgba(0,0,0,.35);color:#fff;font-size:12px;font-family:inherit;outline:none;box-sizing:border-box">' +
+          '</div>' +
+          '<div id="lx-import-hint" style="font-size:11px;color:rgba(255,255,255,0.35);margin:4px 0 10px">支持各平台分享链接，或直接输入歌单ID（需选择对应平台）</div>' +
+          '<div id="lx-import-preview" style="display:none;background:rgba(255,255,255,0.04);border-radius:8px;padding:10px;margin:8px 0">' +
+            '<div style="font-size:12px;font-weight:600" id="lx-import-preview-name"></div>' +
+            '<div style="font-size:11px;color:rgba(255,255,255,0.5);margin-top:3px" id="lx-import-preview-count"></div>' +
+          '</div>' +
+          '<div id="lx-import-error" style="display:none;color:#ff6b6b;font-size:12px;margin:4px 0;padding:6px 10px;background:rgba(255,80,60,0.1);border-radius:6px"></div>' +
+          '<div id="lx-import-loading" style="display:none;text-align:center;padding:20px;color:rgba(255,255,255,0.5);font-size:13px">正在获取歌单...</div>' +
+          '<div class="btn-row" style="margin-top:12px">' +
+            '<button class="modal-btn primary" id="lx-import-fetch-btn" onclick="doLxPlaylistFetch()">获取歌单</button>' +
+            '<button class="modal-btn" id="lx-import-confirm-btn" onclick="confirmLxPlaylistImport()" style="display:none">导入歌单</button>' +
+            '<button class="modal-btn" onclick="hideLxPlaylistImportModal()">取消</button>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+    var temp4 = document.createElement('div');
+    temp4.innerHTML = importModalHtml;
+    document.body.appendChild(temp4.firstChild);
+    // 点击遮罩关闭弹窗
+    var importMask = document.getElementById('lx-import-playlist-modal');
+    if (importMask && !importMask._lxBound) {
+      importMask._lxBound = true;
+      importMask.addEventListener('click', function(e) {
+        if (e.target === importMask) hideLxPlaylistImportModal();
+      });
     }
+    // Enter 键提交
+    var importUrlInput = document.getElementById('lx-playlist-import-url');
+    if (importUrlInput && !importUrlInput._lxBound) {
+      importUrlInput._lxBound = true;
+      importUrlInput.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') doLxPlaylistFetch();
+      });
+    }
+    }
+  }
 
 // 同步注入 LX HTML 元素（必须在 organizeFxConsoleWorkspace 之前执行，以便被正确组织到「系统」→「获取模式」卡片中）
 addLxHtmlElements();
