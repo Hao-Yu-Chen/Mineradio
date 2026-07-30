@@ -405,3 +405,17 @@ document.addEventListener('click', function (e) {
   e.stopPropagation();
   dismissHomePage({ reason: 'blank-click' });
 }, true);
+
+// Android 触屏端: home 页内容需要能滑动查看推荐/电台/歌单等
+(function() {
+  var isMobile = (typeof window.desktopWindow !== 'undefined' && window.desktopWindow.isMobile) ||
+    /Android|iPhone|iPad|iPod|webOS/i.test(navigator.userAgent);
+  if (isMobile) {
+    var home = document.getElementById('empty-home');
+    if (home) {
+      home.style.overflowY = 'auto';
+      home.style.webkitOverflowScrolling = 'touch';
+      home.style.maxHeight = '100vh';
+    }
+  }
+})();
