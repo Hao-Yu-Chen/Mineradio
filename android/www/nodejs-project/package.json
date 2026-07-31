@@ -7,7 +7,7 @@
   "dependencies": {
     "@babel/standalone": "^7.24.0",
     "mpg123-decoder": "^1.0.3",
-    "NeteaseCloudMusicApi": "^4.8.0",
+    "NeteaseCloudMusicApi": "^4.16.0",
     "tunnel": "^0.0.6"
   }
 }

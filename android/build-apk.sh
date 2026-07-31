@@ -133,6 +133,12 @@ if [ ! -d "$NODE_DIR/node_modules" ]; then
     (cd "$NODE_DIR" && npm install --production 2>&1 | tail -3) || echo "  WARNING: npm install may have failed"
 fi
 
+# Fix: Patch NCM source files BEFORE APK assembly
+# On Android /tmp is not writable; NCM writes anonymous_token to os.tmpdir().
+# We patch the NCM source on disk so the fix is baked into the APK.
+echo "  Patching NCM for Android (anonymous_token → homedir)..."
+node "$NODE_DIR/patch-ncm-build.js" 2>&1 || echo "  WARNING: NCM build-time patch failed"
+
 # ── NPM install ──
 echo "[3/5] Installing Capacitor dependencies..."
 npm install --silent 2>&1 | tail -3 || true

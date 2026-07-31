@@ -269,13 +269,20 @@ if exist "..\qishui-audio-decryptor\" xcopy "..\qishui-audio-decryptor\*" "www\n
 echo   Backend modules synced
 
 :: Install Node.js dependencies (NeteaseCloudMusicApi + mpg123-decoder)
-echo   Installing Node.js backend dependencies...
+echo   Installing Node.js backend dependencies ---
 if exist "www\nodejs-project\package.json" (
-    pushd "www\nodejs-project"
-    call npm install --production --silent 2>nul
-    popd
-    if errorlevel 1 echo   WARNING: Node.js npm install had issues, continuing...
+    set "_SAVEDIR=!CD!"
+    cd /d "!CD!\www\nodejs-project"
+    call npm install --production --silent
+    cd /d "!_SAVEDIR!"
 )
+
+:: Fix: Patch NCM source files BEFORE APK assembly
+:: On Android /tmp is not writable; NCM writes anonymous_token to os.tmpdir().
+:: We patch the NCM source on disk so the fix is baked into the APK.
+if exist "www\nodejs-project\node_modules\NeteaseCloudMusicApi" echo   Patching NCM for Android (anonymous_token to homedir)
+if exist "www\nodejs-project\node_modules\NeteaseCloudMusicApi" node "www\nodejs-project\patch-ncm-build.js"
+if errorlevel 1 echo   WARNING: NCM build-time patch failed
 
 :: Patch ESM packages for Node.js Mobile compatibility (require() doesn't support "type":"module")
 if exist "www\nodejs-project\node_modules" (

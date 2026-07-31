@@ -18,6 +18,128 @@ function _safeRequire(modulePath, label) {
 }
 async function noopAsync() { return { body: {}, status: 503 }; }
 
+// NeteaseCloudMusicApi writes anonymous_token to os.tmpdir() during init.
+// On Android /tmp/ is not writable. Primary fix: test-write to tmpdir, and if
+// it fails, directly patch the NCM source files on disk (baked in at build time
+// by patch-ncm-build.js, but also attempted here for non-APK scenarios).
+// v2: fallback path uses __dirname (NCM module dir, inside app data) instead
+// of os.homedir() which returns /data on some Android devices (not writable).
+// Fallback: if the filesystem is read-only (APK bundled node_modules), we
+// monkey-patch os.tmpdir() on the cached require('os') module object.
+(function fixNcmTmpdir() {
+  try {
+    var _os = require('os');
+    var _fs = require('fs');
+    var _path = require('path');
+
+    // Test if tmpdir is actually writable on this platform
+    var _canWriteTmp = false;
+    try {
+      var _testFile = _path.join(_os.tmpdir(), '.mineradio_rw_test');
+      _fs.writeFileSync(_testFile, 'x');
+      _fs.unlinkSync(_testFile);
+      _canWriteTmp = true;
+    } catch (_ignored) {}
+
+    if (!_canWriteTmp) {
+      // Find a writable directory. __dirname is always inside the app's
+      // private data directory on Android, so it's the safest choice.
+      var _altDir = null;
+      var _candidates = [
+        _path.join(__dirname, '.ncm-cache'),
+        _path.join(_os.homedir(), '.cache', 'mineradio-ncm'),
+      ];
+      for (var _ci = 0; _ci < _candidates.length; _ci++) {
+        try {
+          _fs.mkdirSync(_candidates[_ci], { recursive: true });
+          _altDir = _candidates[_ci];
+          break;
+        } catch (_em) {}
+      }
+      if (!_altDir) {
+        console.warn('[BOOT] Cannot create any writable NCM tmpdir');
+        return;
+      }
+
+      // Pre-create anonymous_token so the patched code finds it
+      var _altToken = _path.join(_altDir, 'anonymous_token');
+      try { _fs.writeFileSync(_altToken, '', 'utf-8'); } catch (_fe) {}
+      console.log('[BOOT] /tmp not writable, NCM token dir:', _altDir);
+
+      // The replacement string: a self-contained tmpdir fallback
+      // Uses __dirname (inside app data) instead of os.homedir() (may be /data)
+      var _safeTmp = 'var tmpPath;try{var _td=require("os").tmpdir();' +
+        'var _tf=require("path").join(_td,".ncm_rw_test");' +
+        'require("fs").writeFileSync(_tf,"x");require("fs").unlinkSync(_tf);' +
+        'tmpPath=_td;}catch(_e){tmpPath=require("path").join(' +
+        '__dirname,"..",".ncm-cache");' +
+        'require("fs").mkdirSync(tmpPath,{recursive:true});' +
+        'try{require("fs").writeFileSync(require("path").join(tmpPath,"anonymous_token"),"","utf-8");}catch(_f){}}';
+
+      var _target = "const tmpPath = require('os').tmpdir()";
+
+      var _ncmDir = _path.join(__dirname, 'node_modules', 'NeteaseCloudMusicApi');
+      // app.js (CLI entry) also writes to tmpPath — include it
+      var _files = [
+        'main.js',
+        'app.js',
+        'generateConfig.js',
+        'util' + _path.sep + 'request.js',
+      ];
+
+      var _patchedOk = false;
+      _files.forEach(function(_f) {
+        var _fp = _path.join(_ncmDir, _f);
+        if (!_fs.existsSync(_fp)) {
+          console.warn('[BOOT] NCM file not found:', _f);
+          return;
+        }
+        var _content = _fs.readFileSync(_fp, 'utf8');
+        // Skip if already patched with v2 (uses .ncm-cache fallback)
+        if (_content.indexOf('.ncm-cache') >= 0) {
+          console.log('[BOOT] NCM', _f, 'already patched (v2), skip');
+          _patchedOk = true;
+          return;
+        }
+        if (_content.indexOf(_target) < 0) {
+          console.warn('[BOOT] NCM', _f, 'unexpected format — target string not found');
+          return;
+        }
+        var _patched = _content.split(_target).join(_safeTmp);
+        if (_patched !== _content) {
+          _fs.writeFileSync(_fp, _patched);
+          console.log('[BOOT] Patched NCM', _f, '(v2 — __dirname fallback)');
+          _patchedOk = true;
+        }
+      });
+
+      // Fallback: if we couldn't patch NCM files (e.g. read-only APK bundle),
+      // monkey-patch os.tmpdir() on the cached module so that when NCM calls
+      // `const os = require('os')` it gets our overridden version.
+      if (!_patchedOk) {
+        try {
+          var _origTmpdir = _os.tmpdir;
+          _os.tmpdir = function() {
+            try {
+              var _td = _origTmpdir();
+              var _tf_ = _path.join(_td, '.ncm_rw_test');
+              _fs.writeFileSync(_tf_, 'x');
+              _fs.unlinkSync(_tf_);
+              return _td;
+            } catch (_e2) {
+              return _altDir;
+            }
+          };
+          console.log('[BOOT] NCM file patching not possible, ' +
+            'os.tmpdir() monkey-patched to', _altDir);
+        } catch (_me) {
+          console.warn('[BOOT] os.tmpdir() monkey-patch failed:', _me.message || _me);
+        }
+      }
+    }
+  } catch (e) { console.warn('[BOOT] NCM tmpdir setup error:', e.message || e); }
+})();
+
 var _ncm = _safeRequire('NeteaseCloudMusicApi', 'NeteaseCloudMusicApi');
 var search = _ncm.search || noopAsync;
 var cloudsearch = _ncm.cloudsearch || noopAsync;
@@ -6800,21 +6922,28 @@ const server = http.createServer(async (req, res) => {
 
   if (pn === '/api/login/qr/key') {
     try {
-      const r = await login_qr_key({ timestamp: Date.now() });
-      const key = r.body && r.body.data && r.body.data.unikey;
-      sendJSON(res, { key });
-    } catch (err) { sendJSON(res, { error: err.message }, 500); }
+      var qrKeyFn = typeof login_qr_key === 'function' ? login_qr_key : noopAsync;
+      var isRealFn = typeof login_qr_key === 'function';
+      var r = await qrKeyFn({ timestamp: Date.now() });
+      var key = r.body && r.body.data && r.body.data.unikey;
+      var diag = { isRealFn: isRealFn, status: r.status, hasBody: !!r.body, hasData: !!(r.body && r.body.data), keys: r.body && r.body.data ? Object.keys(r.body.data).join(',') : '' };
+      if (!key) console.warn('[QR Key] empty. diag:', JSON.stringify(diag));
+      sendJSON(res, { key: key || null, _diag: diag });
+    } catch (err) { console.error('[QR Key] error:', err.message); sendJSON(res, { error: err.message, _diag: { isRealFn: typeof login_qr_key === 'function', error: err.message } }, 500); }
     return;
   }
 
   // ---------- 登录: QR 二维码图片 ----------
   if (pn === '/api/login/qr/create') {
     try {
-      const key = url.searchParams.get('key');
-      const r = await login_qr_create({ key, qrimg: true, timestamp: Date.now() });
-      const d = r.body && r.body.data;
-      sendJSON(res, { img: d && d.qrimg, url: d && d.qrurl });
-    } catch (err) { sendJSON(res, { error: err.message }, 500); }
+      var qrCreateFn = typeof login_qr_create === 'function' ? login_qr_create : noopAsync;
+      var key = url.searchParams.get('key');
+      var r = await qrCreateFn({ key, qrimg: true, timestamp: Date.now() });
+      var d = r.body && r.body.data;
+      var img = d && d.qrimg;
+      if (!img) console.warn('[QR Create] got empty img. fnIsReal:', typeof login_qr_create === 'function', 'key:', key, 'd:', JSON.stringify(d || {}).substring(0, 200));
+      sendJSON(res, { img: img, url: d && d.qrurl });
+    } catch (err) { console.error('[QR Create] error:', err.message); sendJSON(res, { error: err.message }, 500); }
     return;
   }
 
