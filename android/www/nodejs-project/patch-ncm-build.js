@@ -77,4 +77,22 @@ files.forEach(function(f) {
     }
 });
 
+// Also patch QR login modules: type 1 -> type 3 (deprecated type causes
+// "设备环境异常" rejection on newer NetEase servers)
+var qrModules = ['module' + path.sep + 'login_qr_key.js', 'module' + path.sep + 'login_qr_check.js'];
+qrModules.forEach(function (f) {
+    var fp = path.join(ncmDir, f);
+    if (!fs.existsSync(fp)) { console.log('[PATCH-NCM] QR module not found: ' + f); return; }
+    var c = fs.readFileSync(fp, 'utf8');
+    if (c.indexOf('type: 3') >= 0) {
+        console.log('[PATCH-NCM] QR module already type=3: ' + f);
+        return;
+    }
+    var c2 = c.replace('type: 1', 'type: 3');
+    if (c2 !== c) {
+        fs.writeFileSync(fp, c2);
+        console.log('[PATCH-NCM] QR module type 1→3: ' + f);
+    }
+});
+
 console.log('[PATCH-NCM] Done — patched:' + patched + ' skipped:' + skipped + ' missing:' + missing);
