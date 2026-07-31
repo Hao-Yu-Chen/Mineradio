@@ -73,8 +73,10 @@ function bindModalBackdropClose() {
 function onUserBtnClick() {
   if (topAccountPillClickSuppressed) {
     topAccountPillClickSuppressed = false;
+    console.log('[Login] Click suppressed (drag in progress)');
     return;
   }
+  console.log('[Login] onUserBtnClick → showLoginModal. lxSourceEnabled:', (typeof fx !== 'undefined' && fx && fx.lxSourceEnabled), '| hasLogin:', (typeof hasAnyPlatformLogin === 'function' ? hasAnyPlatformLogin() : '?'));
   showLoginModal({ provider: hasAnyPlatformLogin() ? firstLoggedProvider() : loginProvider, source: 'top-account' });
 }
 var ACCOUNT_PROVIDER_KEYS = ['netease', 'qq', 'kugou', 'qishui', 'spotify'];

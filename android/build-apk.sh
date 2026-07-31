@@ -116,19 +116,16 @@ echo "  Patching done"
 # ── Prepare Node.js project ──
 echo "[2/5] Preparing Node.js project..."
 NODE_DIR="www/nodejs-project"
-if [ ! -f "$NODE_DIR/server.js" ]; then
-    echo "  WARNING: server.js not found in www/nodejs-project/"
-    echo "  Copying from parent project..."
-    mkdir -p "$NODE_DIR"
-    cp ../server.js "$NODE_DIR/"
-    cp ../lx-source-engine.js "$NODE_DIR/"
-    cp ../lx-search.js "$NODE_DIR/"
-    cp ../dj-analyzer.js "$NODE_DIR/"
-    if [ -f "../lx-playlist.js" ]; then cp ../lx-playlist.js "$NODE_DIR/"; fi
-fi
 
-# Always sync dependent modules (even if server.js already exists)
-if [ -f "../lx-playlist.js" ]; then cp ../lx-playlist.js "$NODE_DIR/"; fi
+# Always sync core JS files from parent project (force overwrite)
+mkdir -p "$NODE_DIR"
+echo "  Syncing backend modules from parent project..."
+# Sync all root-level .js files (server.js + API modules)
+cp ../*.js "$NODE_DIR/"
+# Sync subdirectory modules (cuefield, qishui-audio-decryptor)
+if [ -d "../cuefield" ]; then cp -r ../cuefield "$NODE_DIR/"; fi
+if [ -d "../qishui-audio-decryptor" ]; then cp -r ../qishui-audio-decryptor "$NODE_DIR/"; fi
+echo "  Backend modules synced"
 
 # Install Node.js dependencies if needed
 if [ ! -d "$NODE_DIR/node_modules" ]; then
@@ -147,6 +144,11 @@ npx cap sync android 2>&1
 # ── Build APK ──
 echo "[5/5] Building APK..."
 cd android
+
+# Clean stale build cache to prevent stale asset contamination
+echo "  Cleaning Gradle build cache..."
+./gradlew clean 2>&1 >/dev/null
+echo "  Build cache cleaned"
 
 if [ "$BUILD_TYPE" = "release" ]; then
     ./gradlew assembleRelease 2>&1

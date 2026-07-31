@@ -196,6 +196,11 @@ function selectLoginProviderNode(provider) {
   setLoginProvider(provider, true);
   setLoginAuthDrawerOpen(hasLoginWorkflowConnection(provider) || loginWorkflowPendingProvider === provider);
   updateLoginProviderUi();
+  // On mobile there is no wire-drag, so clicking a provider directly connects it
+  var isDesktopEnv = !!(window.desktopWindow && window.desktopWindow.isDesktop);
+  if (!isDesktopEnv && !hasLoginWorkflowConnection(provider)) {
+    connectLoginProviderToMr(provider);
+  }
 }
 function connectLoginProviderToMr(provider) {
   provider = normalizeLoginProviderKey(provider);
@@ -714,7 +719,7 @@ function updateLoginProviderUi() {
   var kugouBtn = document.getElementById('login-provider-kugou');
   var qishuiBtn = document.getElementById('login-provider-qishui');
   var qqCookieSaveBtn = document.getElementById('qq-cookie-save-btn');
-  var canOpenNeteaseWeb = !!(window.desktopWindow && typeof window.desktopWindow.openNeteaseMusicLogin === 'function');
+  var canOpenNeteaseWeb = !!(window.desktopWindow && window.desktopWindow.isDesktop && typeof window.desktopWindow.openNeteaseMusicLogin === 'function');
   var hasQishuiLocalImportBridge = !!(window.desktopWindow && typeof window.desktopWindow.openQishuiMusicLogin === 'function');
   var canOpenQishuiOfficialWindow = hasQishuiLocalImportBridge;
   var qishuiSearchReady = qishuiPublicSearchReady();
@@ -916,7 +921,7 @@ async function refreshQr() {
     }
     return;
   }
-  if (window.desktopWindow && typeof window.desktopWindow.openNeteaseMusicLogin === 'function') {
+  if (window.desktopWindow && window.desktopWindow.isDesktop && typeof window.desktopWindow.openNeteaseMusicLogin === 'function') {
     qrKey = null;
     var neImg = document.getElementById('qr-img');
     var neStatus = document.getElementById('qr-status');

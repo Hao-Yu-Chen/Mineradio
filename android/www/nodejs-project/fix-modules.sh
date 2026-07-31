@@ -1,6 +1,8 @@
 #!/bin/bash
 set -e
-NODE_DIR="/c/Users/Administrator/Documents/Mineradio/android/www/nodejs-project"
+# Resolve script directory regardless of where it's called from
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+NODE_DIR="$SCRIPT_DIR"
 cd "$NODE_DIR"
 
 echo "=== Patching mpg123-decoder ==="

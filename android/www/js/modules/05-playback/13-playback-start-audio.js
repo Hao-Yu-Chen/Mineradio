@@ -1049,7 +1049,13 @@ async function playQueueAt(idx, opts) {
         colorMixDuration: sameAlbumCoverSwitch ? 1 : undefined
       };
       if (customCover) applyCoverDataUrl(customCover, coverOpts);
-      else loadCoverFromUrl(song.cover ? coverUrlWithSize(song.cover, 400) : '', coverOpts);
+      else {
+        var rawCover = albumGaplessCoverKey(song);
+        if (!rawCover) {
+          console.warn('[Cover] No cover URL for:', (song.name || song.title || '?'), '| source:', (song.source || song.provider || '?'), '| id:', (song.id || song.songmid || '?'), '| fields:', JSON.stringify({ cover: song.cover, picUrl: song.picUrl, albumCover: song.albumCover, coverUrl: song.coverUrl }));
+        }
+        loadCoverFromUrl(rawCover ? coverUrlWithSize(rawCover, 400) : '', coverOpts);
+      }
     });
     safePlaybackStep('trial-banner-reset', function () { document.getElementById('trial-banner').classList.remove('show'); });
     if (song.type === 'local' || song.source === 'local' || song.localUrl) {

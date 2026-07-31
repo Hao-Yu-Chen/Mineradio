@@ -32,6 +32,7 @@
       "server.js",
       "lx-source-engine.js",
       "lx-search.js",
+      "lx-playlist.js",
       "*-api.js",
       "qishui-audio-decryptor/**/*",
       "dj-analyzer.js",

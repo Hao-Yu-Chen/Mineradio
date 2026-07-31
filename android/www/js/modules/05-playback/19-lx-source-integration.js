@@ -748,7 +748,8 @@ function doLxImport() {
   }).catch(function(err) {
     if (err.message !== 'import failed') {
       console.error('[lx] import error:', err);
-      if (typeof showToast === 'function') showToast('导入失败: 网络错误');
+      var netMsg = '导入失败: ' + (err.message || '网络错误');
+      if (typeof showToast === 'function') showToast(netMsg);
       }
   }).then(function() {
     if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = '确认'; }
@@ -1464,6 +1465,9 @@ function escHtmlLx(str) {
       // 如果是 LX 歌曲且没有预先解析的 URL，先通过 LX API 获取播放 URL
       // 但在网络请求之前：立即暂停当前音频并更新底部栏，给用户即时反馈
       if (song && isLxSourceSong(song) && !opts.preResolvedPlaybackData && !opts.lxFallbackUrl && !opts.autoRepeat) {
+        // Force refresh (skip cache) on recovery retries — the cached URL already failed playback
+        var _lxForceRefresh = !!(opts.resumeRecovery || opts.sourceFallbackRecovery);
+        if (_lxForceRefresh) console.log('[LX Resolve] Recovery retry — forcing cache refresh');
         if (typeof pauseCurrentAudioForTrackSwitch === 'function') pauseCurrentAudioForTrackSwitch();
         try { document.getElementById('hint').classList.add('hidden'); } catch(e) {}
         var _tt = document.getElementById('thumb-title'); if (_tt) _tt.textContent = song.name || '';
@@ -1486,6 +1490,7 @@ function escHtmlLx(str) {
         // Helper: build song/url request URL for a source
         function _buildLxUrl(src, songId, srcSong) {
           var u = '/api/lx/song/url?source=' + encodeURIComponent(src) + '&songId=' + encodeURIComponent(songId) + '&quality=' + encodeURIComponent(rawQuality);
+          if (_lxForceRefresh) u += '&refresh=1';
           if (srcSong) {
             var h = srcSong.hash || srcSong.copyrightId || '';
             if (h && h !== songId) u += '&hash=' + encodeURIComponent(h);
@@ -1552,22 +1557,44 @@ function escHtmlLx(str) {
           if (src === primarySrc && primaryId) {
             return _fetchSongUrl(src, primaryId, song);
           }
+          console.log('[LX Resolve] Searching alt source:', src, 'for:', (song.name || '').substring(0, 30));
           var altSong = await _searchAltSource(src);
-          if (!altSong) return null;
+          if (!altSong) { console.warn('[LX Resolve] Alt source', src, '— no search results'); return null; }
           var altId = altSong.songmid || altSong.mid || altSong.id || '';
-          if (!altId) return null;
+          if (!altId) { console.warn('[LX Resolve] Alt source', src, '— no ID in search result'); return null; }
           return _fetchSongUrl(src, altId, altSong);
         }
 
         // ---- Main flow: primary first, then parallel alt sources ----
-        // Try primary source first (most likely to work, no search overhead)
-        lxData = await _resolveSource(primarySrc);
-        if (_lxCancelled()) return;
-
-        // If primary failed, try all alternative sources in parallel
-        if (!lxData || !lxData.url) {
-          var altSources = sourcesToTry.slice(1); // skip primary
+        // In recovery mode (_lxForceRefresh), the primary source URL already failed
+        // playback. Skip it entirely and race only the alternative sources so a
+        // working one can take over.
+        if (_lxForceRefresh) {
+          var altSources = sourcesToTry.filter(function(s) { return s !== primarySrc; });
           if (altSources.length > 0) {
+            console.log('[LX Resolve] Recovery — skipping failed primary', primarySrc, '| racing', altSources.length, 'alts:', JSON.stringify(altSources));
+            lxData = null; // will be filled by the race below
+          } else {
+            console.warn('[LX Resolve] Recovery — no alt sources available, retrying primary with refresh');
+            lxData = await _resolveSource(primarySrc);
+            if (_lxCancelled()) return;
+          }
+        } else {
+          console.log('[LX Resolve] Primary source:', primarySrc, 'id:', primaryId, '| all sources:', JSON.stringify(sourcesToTry));
+          lxData = await _resolveSource(primarySrc);
+          if (_lxCancelled()) return;
+          if (!lxData || !lxData.url) {
+            console.warn('[LX Resolve] Primary', primarySrc, 'FAILED —', lxData ? 'no url in response' : 'null response');
+          } else {
+            console.log('[LX Resolve] Primary', primarySrc, 'OK — url:', (lxData.url || '').substring(0, 80));
+          }
+        }
+
+        // If primary failed (or recovery mode), try alternative sources in parallel
+        if (!lxData || !lxData.url) {
+          var altSources = altSources || sourcesToTry.slice(1); // recovery already has altSources
+          if (altSources.length > 0) {
+            console.warn('[LX Resolve] Trying', altSources.length, 'sources:', JSON.stringify(altSources));
             // Race: first alt source to return a playable URL wins
             // Manual Promise.any polyfill (safe for older WebViews)
             var altResolvers = [];
@@ -1605,11 +1632,20 @@ function escHtmlLx(str) {
 
             var raceResult = await racePromise;
             clearTimeout(raceTimer);
-            if (raceResult && raceResult.url) lxData = raceResult;
+            if (raceResult && raceResult.url) {
+              console.log('[LX Resolve] Alt source', raceResult.provider || '?', 'returned URL');
+              lxData = raceResult;
+            } else {
+              console.error('[LX Resolve] ALL alt sources FAILED. Sources tried:', JSON.stringify(altSources));
+            }
+          } else {
+            console.error('[LX Resolve] No alt sources available — only source is', primarySrc);
           }
         }
         if (lxData && lxData.url) {
           opts = Object.assign({}, opts, { preResolvedPlaybackData: lxData });
+        } else {
+          console.error('[LX Resolve] ALL sources exhausted for:', (song.name || '?'), '| sourcesToTry:', JSON.stringify(sourcesToTry));
         }
       }
       // 无论是否 LX 歌曲，始终调用原始播放逻辑
@@ -1937,7 +1973,7 @@ addLxHtmlElements();
     var _origShowLoginModal = showLoginModal;
     showLoginModal = function(opts) {
       if (typeof fx !== 'undefined' && fx && fx.lxSourceEnabled) {
-        // LX 模式下静默跳过登录弹窗，不显示任何 toast 避免干扰启动画面
+        console.log('[Login] Suppressed — LX mode is active (lxSourceEnabled=true). Use ?lx=0 to disable.');
         return;
       }
       return _origShowLoginModal(opts);

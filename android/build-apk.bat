@@ -13,16 +13,28 @@ set SCRIPT_DIR=%~dp0
 
 set BUILD_TYPE=debug
 set TV_MODE=0
-set APP_VERSION=2.0.2
+set APP_VERSION=
 
 :parse_args
-if "%~1"=="" goto check_env
+if "%~1"=="" goto read_version
 if /i "%~1"=="--release" set BUILD_TYPE=release
 if /i "%~1"=="--release" shift && goto parse_args
 if /i "%~1"=="--tv" set TV_MODE=1
 if /i "%~1"=="--tv" shift && goto parse_args
 shift
 goto parse_args
+
+:: ---- Read version from root package.json ----
+:read_version
+if exist "..\package.json" (
+    node -e "process.stdout.write(require('../package.json').version)" > "_v.txt" 2>nul
+    if exist "_v.txt" (
+        set /p APP_VERSION=<"_v.txt" >nul 2>&1
+        del "_v.txt" >nul 2>&1
+    )
+)
+if "!APP_VERSION!"=="" set APP_VERSION=0.0.0
+goto check_env
 
 :: ============================================================
 :check_env
@@ -195,13 +207,6 @@ if %errorlevel% neq 0 (
     echo   SDK packages installed.
 )
 
-:: ---- Read version from package.json ----
-node -e "require('fs').writeFileSync('_v.txt',require('../package.json').version)" 2>nul
-if exist "_v.txt" (
-    set /p APP_VERSION=<"_v.txt"
-    del "_v.txt" >nul 2>&1
-)
-
 :: ============================================================
 :build_start
 :: ============================================================
@@ -254,19 +259,31 @@ if exist "www\index.html" (
 echo [2/5] Preparing Node.js project...
 if not exist "www\nodejs-project\" mkdir "www\nodejs-project" >nul 2>&1
 
-if not exist "www\nodejs-project\server.js" (
-    echo   Copying server.js from parent project...
-    copy "..\server.js" "www\nodejs-project\" >nul
-    copy "..\lx-source-engine.js" "www\nodejs-project\" >nul
-    copy "..\lx-search.js" "www\nodejs-project\" >nul
-    copy "..\dj-analyzer.js" "www\nodejs-project\" >nul
-    if exist "..\lx-playlist.js" copy "..\lx-playlist.js" "www\nodejs-project\" >nul 2>nul
-    if exist "..\ncm-wrapper.js" copy "..\ncm-wrapper.js" "www\nodejs-project\" >nul 2>nul
-    echo   Done
+:: Always sync core JS files from parent project (force overwrite)
+echo   Syncing backend modules from parent project...
+:: Sync all root-level .js files (server.js + API modules)
+copy "..\*.js" "www\nodejs-project\" >nul
+:: Sync subdirectory modules (cuefield, qishui-audio-decryptor)
+if exist "..\cuefield\" xcopy "..\cuefield\*" "www\nodejs-project\cuefield\" /E /Y /I /Q >nul
+if exist "..\qishui-audio-decryptor\" xcopy "..\qishui-audio-decryptor\*" "www\nodejs-project\qishui-audio-decryptor\" /E /Y /I /Q >nul
+echo   Backend modules synced
+
+:: Install Node.js dependencies (NeteaseCloudMusicApi + mpg123-decoder)
+echo   Installing Node.js backend dependencies...
+if exist "www\nodejs-project\package.json" (
+    pushd "www\nodejs-project"
+    call npm install --production --silent 2>nul
+    popd
+    if errorlevel 1 echo   WARNING: Node.js npm install had issues, continuing...
 )
 
-:: Always sync dependent modules (even if server.js already exists)
-if exist "..\lx-playlist.js" copy "..\lx-playlist.js" "www\nodejs-project\" >nul 2>nul
+:: Patch ESM packages for Node.js Mobile compatibility (require() doesn't support "type":"module")
+if exist "www\nodejs-project\node_modules" (
+    powershell -NoProfile -Command ^
+      "$dirs = @('www\nodejs-project\node_modules\mpg123-decoder', 'www\nodejs-project\node_modules\@eshaz\web-worker', 'www\nodejs-project\node_modules\simple-yenc', 'www\nodejs-project\node_modules\@wasm-audio-decoders\common');" ^
+      "foreach ($d in $dirs) { $p = Join-Path $d 'package.json'; if (Test-Path $p) { $c = Get-Content $p -Raw -Encoding UTF8; $c = $c -replace '\""type\""\s*:\s*\""module\""\s*,?', ''; $c = $c -replace ',\s*}', '}'; Set-Content $p $c -Encoding UTF8 -NoNewline; Write-Host ('  Patched: ' + $d); } }" 2>&1
+    echo   ESM patching done
+)
 
 :: ---- Step 3: npm install ----
 echo [3/5] Installing Capacitor dependencies...
@@ -295,6 +312,11 @@ if not exist "!GRADLE_DIR!\gradlew.bat" (
 )
 cd /d "!GRADLE_DIR!"
 echo   Working dir: %cd%
+
+:: Clean stale build cache to prevent stale asset contamination
+echo   Cleaning Gradle build cache...
+call gradlew.bat clean 2>&1 >nul
+echo   Build cache cleaned
 
 if /i "!BUILD_TYPE!"=="release" (
     echo   Running: gradlew assembleRelease

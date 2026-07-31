@@ -92,6 +92,7 @@
   var _statusCanvas = '';
   var _statusFailAt = 0;
   var _lxUiRetried = false;
+  var _loginRetried = false;
 
   function showStatus(msg, color) {
     var el = document.getElementById('_m_status');
@@ -120,6 +121,15 @@
       if (!_lxUiRetried && typeof updateLxUI === 'function') {
         _lxUiRetried = true;
         updateLxUI();
+      }
+      // Retry login status checks after server comes online (cold start ~6s delay)
+      if (!_loginRetried && typeof refreshLoginStatus === 'function') {
+        _loginRetried = true;
+        try { refreshLoginStatus(true); } catch (ignored) {}
+        try { if (typeof refreshQQLoginStatus === 'function') refreshQQLoginStatus(true); } catch (ignored) {}
+        try { if (typeof refreshKugouLoginStatus === 'function') refreshKugouLoginStatus(true); } catch (ignored) {}
+        try { if (typeof refreshQishuiLoginStatus === 'function') refreshQishuiLoginStatus(true); } catch (ignored) {}
+        try { if (typeof refreshSpotifyLoginStatus === 'function') refreshSpotifyLoginStatus(true); } catch (ignored) {}
       }
     }).catch(function(e) {
       if (!_statusFailAt) _statusFailAt = Date.now();

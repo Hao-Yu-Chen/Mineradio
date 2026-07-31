@@ -14,6 +14,9 @@ function loadCoverFromUrl(directUrl, opts) {
   opts = opts || {};
   var preserveOnSwitch = !!(opts.trackSwitch || opts.seamlessCover || opts.seamlessTrackSwitch);
   if (!directUrl || typeof directUrl !== 'string' || !/^https?:\/\//i.test(directUrl)) {
+    if (directUrl && typeof directUrl === 'string' && directUrl.length > 0) {
+      console.warn('[Cover] Invalid cover URL (not http/https):', directUrl.substring(0, 200));
+    }
     if (!coverApplyStillCurrent(opts)) return;
     if (preserveOnSwitch && uniforms.uHasCover.value > 0.5) {
       document.getElementById('thumb-cover').removeAttribute('src');
@@ -33,6 +36,7 @@ function loadCoverFromUrl(directUrl, opts) {
   var proxiedUrl = coverProxySrc(directUrl);
   if (!proxiedUrl) {
     if (preserveOnSwitch && uniforms.uHasCover.value > 0.5) return;
+    console.warn('[Cover] coverProxySrc returned empty for:', directUrl);
     uniforms.uHasCover.value = 0; setCoverDepthState(0, 0, 1);
     resetFloatColorsToIdle();
     setAlbumBackground('');
@@ -41,26 +45,47 @@ function loadCoverFromUrl(directUrl, opts) {
   }
   var img = new Image(); img.crossOrigin = 'anonymous'; img.decoding = 'async';
   img.onload = function () {
-    if (!coverApplyStillCurrent(opts)) return;
+    if (!coverApplyStillCurrent(opts)) { console.log('[Cover] Loaded but no longer current, discarding'); return; }
     var size = coverTextureSizeForResolution(fx.coverResolution);
     var cv = document.createElement('canvas'); cv.width = cv.height = size;
     var cx = cv.getContext('2d');
     var iw = img.naturalWidth, ih = img.naturalHeight, s = Math.min(iw, ih);
-    cx.drawImage(img, (iw - s) / 2, (ih - s) / 2, s, s, 0, 0, size, size);
+    try {
+      cx.drawImage(img, (iw - s) / 2, (ih - s) / 2, s, s, 0, 0, size, size);
+    } catch (drawErr) {
+      console.error('[Cover] Canvas drawImage failed:', drawErr.message || drawErr, '| URL:', directUrl, '| size:', iw + 'x' + ih);
+      // drawImage 可能因 CMYK JPEG、超大图或 tainted canvas 失败
+      // 图片本身已加载成功（UI <img>能显示），但 WebGL 无法使用
+      if (!coverApplyStillCurrent(opts)) return;
+      if (preserveOnSwitch && uniforms.uHasCover.value > 0.5) return;
+      uniforms.uHasCover.value = 0; setCoverDepthState(0, 0, 1);
+      return;
+    }
     setAlbumBackground(proxiedUrl || directUrl);
     applyCoverCanvas(cv, proxiedUrl || directUrl, Object.assign({}, opts, { coverKey: directUrl || proxiedUrl || '', coverSourceKind: 'url', coverSource: directUrl }));
   };
   img.onerror = function () {
+    console.warn('[Cover] Proxy load failed:', proxiedUrl, '→ trying direct:', directUrl);
     var img2 = new Image(); img2.crossOrigin = 'anonymous'; img2.decoding = 'async';
     img2.onload = function () {
+      console.log('[Cover] Direct load succeeded for:', directUrl);
       if (!coverApplyStillCurrent(opts)) return;
       var size = coverTextureSizeForResolution(fx.coverResolution);
       var cv = document.createElement('canvas'); cv.width = cv.height = size;
-      cv.getContext('2d').drawImage(img2, 0, 0, size, size);
+      try {
+        cv.getContext('2d').drawImage(img2, 0, 0, size, size);
+      } catch (drawErr) {
+        console.error('[Cover] Direct drawImage failed:', drawErr.message || drawErr, '| URL:', directUrl);
+        if (!coverApplyStillCurrent(opts)) return;
+        if (preserveOnSwitch && uniforms.uHasCover.value > 0.5) return;
+        uniforms.uHasCover.value = 0; setCoverDepthState(0, 0, 1);
+        return;
+      }
       setAlbumBackground(directUrl);
       applyCoverCanvas(cv, directUrl, Object.assign({}, opts, { coverKey: directUrl || '', coverSourceKind: 'url', coverSource: directUrl }));
     };
     img2.onerror = function () {
+      console.error('[Cover] Both proxy and direct load failed. Proxy:', proxiedUrl, 'Direct:', directUrl);
       if (!coverApplyStillCurrent(opts)) return;
       if (preserveOnSwitch && uniforms.uHasCover.value > 0.5) return;
       currentCoverSource = null;

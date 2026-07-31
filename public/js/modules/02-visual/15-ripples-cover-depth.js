@@ -558,7 +558,10 @@ function updateControlTrackInfo(song) {
 
 function applyCoverCanvas(cv, thumbSrc, opts) {
   opts = opts || {};
-  if (!cv || !coverApplyStillCurrent(opts)) return;
+  if (!cv || !coverApplyStillCurrent(opts)) {
+    if (cv) console.log('[Cover] applyCoverCanvas skipped — not current. token:', opts.trackToken);
+    return;
+  }
   var token = ++coverProcessToken;
   if (opts.coverSource && opts.coverSourceKind) {
     currentCoverSource = { kind: opts.coverSourceKind, src: opts.coverSource };
@@ -582,6 +585,15 @@ function applyCoverCanvas(cv, thumbSrc, opts) {
   coverTex.image = cv; coverTex.needsUpdate = true;
   coverPickerCanvas = cv;
   uniforms.uHasCover.value = 1;
+  console.log('[Cover] Texture applied: uHasCover=1 | coverTex size:', (cv.width || 0) + 'x' + (cv.height || 0), '| needsUpdate:', coverTex.needsUpdate, '| sourceKind:', (opts.coverSourceKind || '?'));
+  // 延迟验证: 2秒后检查 uHasCover 是否仍为 1
+  (function(expectedToken) {
+    setTimeout(function() {
+      if (uniforms.uHasCover.value < 0.5) {
+        console.warn('[Cover] uHasCover was RESET to', uniforms.uHasCover.value, 'within 2s! Expected token', expectedToken, 'current token', coverProcessToken);
+      }
+    }, 2000);
+  })(token);
   if (cachedDepth && cachedDepth.canvas) {
     coverEdgeTex.image = cachedDepth.canvas;
     coverEdgeTex.needsUpdate = true;

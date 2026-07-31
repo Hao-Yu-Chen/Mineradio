@@ -410,12 +410,64 @@ document.addEventListener('click', function (e) {
 (function() {
   var isMobile = (typeof window.desktopWindow !== 'undefined' && window.desktopWindow.isMobile) ||
     /Android|iPhone|iPad|iPod|webOS/i.test(navigator.userAgent);
-  if (isMobile) {
+  if (!isMobile) return;
+
+  function applyHomeScrolling() {
     var home = document.getElementById('empty-home');
-    if (home) {
-      home.style.overflowY = 'auto';
-      home.style.webkitOverflowScrolling = 'touch';
-      home.style.maxHeight = '100vh';
+    if (!home) return;
+    var vh = window.innerHeight;
+    var top = Math.max(132, home.getBoundingClientRect().top);
+    home.style.overflowY = 'auto';
+    home.style.overflowX = 'hidden';
+    home.style.webkitOverflowScrolling = 'touch';
+    home.style.touchAction = 'pan-y';
+    home.style.maxHeight = (vh - top - 44) + 'px';
+    // Unlock .empty-home-shell height so content can push beyond the container,
+    // triggering the parent's overflow-y:auto scrollbar. CSS height:100% prevents
+    // the shell from growing, which hides overflow from the scroll container.
+    var shell = home.querySelector('.empty-home-shell');
+    if (shell) {
+      shell.style.height = 'auto';
+      shell.style.minHeight = '100%';
+    }
+    // Mobile card layout: simplify .home-ranking-entry grid to 2 columns
+    // (text + arrow) to prevent squeezing in narrow landscape viewports.
+    var cards = home.querySelectorAll('.home-ranking-entry');
+    for (var i = 0; i < cards.length; i++) {
+      cards[i].style.gridTemplateColumns = 'minmax(0,1fr) 28px';
+      cards[i].style.minHeight = 'auto';
+      cards[i].style.padding = '12px 14px';
+      cards[i].style.gap = '10px';
+      var art = cards[i].querySelector('.home-ranking-entry-art');
+      if (art) art.style.display = 'none';
+    }
+    // In landscape, pin the left hero (time + daily comments) so it stays
+    // visible while the right column scrolls independently.
+    var isLandscape = window.innerWidth > window.innerHeight;
+    var hero = home.querySelector('.home-hero');
+    if (hero && isLandscape) {
+      hero.style.position = 'sticky';
+      hero.style.top = '0';
+      hero.style.alignSelf = 'start';
+      hero.style.zIndex = '2';
+      hero.style.gridRow = '1'; // don't span both rows, so it pins at top
+    } else if (hero) {
+      hero.style.position = '';
+      hero.style.top = '';
+      hero.style.alignSelf = '';
+      hero.style.zIndex = '';
+      hero.style.gridRow = '';
     }
   }
+
+  // Apply on load
+  applyHomeScrolling();
+
+  // Re-apply on orientation change (landscape ↔ portrait)
+  window.addEventListener('orientationchange', function() {
+    setTimeout(applyHomeScrolling, 320);
+  });
+  window.addEventListener('resize', function() {
+    setTimeout(applyHomeScrolling, 320);
+  });
 })();

@@ -403,17 +403,37 @@ async function _processScript(body, originUrl) {
 async function importSource(originUrl) {
   // 1. Fetch script
   var body = await new Promise(function(resolve, reject) {
-    var parsed = new URL(originUrl);
+    var parsed;
+    try { parsed = new URL(originUrl); } catch (e) { return reject(new Error('Invalid URL: ' + e.message)); }
+    if (!/^https?:$/.test(parsed.protocol)) return reject(new Error('Unsupported protocol: ' + parsed.protocol));
     var mod = parsed.protocol === 'https:' ? https : http;
-    mod.get(originUrl, { timeout: 20000 }, function(res) {
+    var opts = {
+      timeout: 20000,
+      headers: {
+        'User-Agent': 'Mineradio-LX/2.0 (Node.js)',
+        'Accept': 'text/plain, application/javascript, */*'
+      }
+    };
+    var req = mod.get(originUrl, opts, function(res) {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        req.destroy();
         return importSource(res.headers.location).then(resolve).catch(reject);
       }
-      if (res.statusCode !== 200) return reject(new Error('HTTP ' + res.statusCode));
+      if (res.statusCode !== 200) {
+        req.destroy();
+        return reject(new Error('HTTP ' + res.statusCode));
+      }
       var chunks = [];
       res.on('data', function(c) { chunks.push(c); });
       res.on('end', function() { resolve(Buffer.concat(chunks).toString('utf8')); });
-    }).on('error', reject);
+    });
+    req.on('error', function(e) {
+      reject(new Error('Fetch failed: ' + (e.message || 'unknown')));
+    });
+    req.on('timeout', function() {
+      req.destroy();
+      reject(new Error('Fetch timed out after 20s'));
+    });
   });
 
   if (body.length > 9 * 1024 * 1024) throw new Error('Script too large (>9MB)');
@@ -612,8 +632,11 @@ function createCacheStore(opts) {
 
   function _validateEntry(entry) {
     if (!entry) return false;
-    var age = Date.now() - entry.ts;
-    if (age > store.ttl) return false;          // expired
+    // TTL <= 0 means "never expire" — only evict via failCount >= 3
+    if (store.ttl > 0) {
+      var age = Date.now() - entry.ts;
+      if (age > store.ttl) return false;          // expired
+    }
     if (entry.failCount >= 3) return false;      // too many failures (pollution protection)
     return true;
   }
@@ -765,10 +788,10 @@ var cacheConfig = {
       if (state && state.cacheConfig) Object.assign(cacheConfig, state.cacheConfig);
     }
   } catch (e) {}
-  // Apply loaded config
-  musicUrlCache.updateConfig({ maxEntries: cacheConfig.urlMax, ttl: cacheConfig.urlTtlMinutes * 60 * 1000 });
-  lyricCache.updateConfig({ maxEntries: cacheConfig.lyricMax, ttl: cacheConfig.lyricTtlDays * 24 * 60 * 60 * 1000 });
-  crossSourceCache.updateConfig({ maxEntries: cacheConfig.crossMax, ttl: cacheConfig.crossTtlMinutes * 60 * 1000 });
+  // Apply loaded config (TTL=0 means never expire → use NEVER_TTL)
+  musicUrlCache.updateConfig({ maxEntries: cacheConfig.urlMax, ttl: cacheConfig.urlTtlMinutes > 0 ? cacheConfig.urlTtlMinutes * 60 * 1000 : NEVER_TTL });
+  lyricCache.updateConfig({ maxEntries: cacheConfig.lyricMax, ttl: cacheConfig.lyricTtlDays > 0 ? cacheConfig.lyricTtlDays * 24 * 60 * 60 * 1000 : NEVER_TTL });
+  crossSourceCache.updateConfig({ maxEntries: cacheConfig.crossMax, ttl: cacheConfig.crossTtlMinutes > 0 ? cacheConfig.crossTtlMinutes * 60 * 1000 : NEVER_TTL });
 })();
 
 function _saveState() {
@@ -837,9 +860,10 @@ function handleAction(action, source, info) {
     }
 
     var active = getActiveSource();
-    if (!active) return safeReject(new Error('No active LX source'));
-    if (!active.sources[source]) return safeReject(new Error('Source "' + source + '" not supported by active script'));
+    if (!active) { console.warn('[LX handleAction] No active LX source loaded'); return safeReject(new Error('No active LX source')); }
+    if (!active.sources[source]) { console.warn('[LX handleAction] Source "' + source + '" not in active script. Available:', JSON.stringify(Object.keys(active.sources))); return safeReject(new Error('Source "' + source + '" not supported by active script')); }
     if (!active.sources[source].actions || active.sources[source].actions.indexOf(action) === -1) {
+      console.warn('[LX handleAction] Action "' + action + '" not in source "' + source + '" actions:', JSON.stringify(active.sources[source].actions || []));
       return safeReject(new Error('Action "' + action + '" not supported for source "' + source + '"'));
     }
 
@@ -866,10 +890,15 @@ function doHandleAndCache(action, source, info, resolve, reject) {
         musicUrlCache.set(cacheKey, data);
       }
     }
-    // If isRefresh=true and old URL was bad, increment failCount on old key
+    // If isRefresh=true, the old cached URL has been proven bad (e.g. 404).
+    // Delete it immediately rather than waiting for failCount to reach 3.
+    // failCount slow-increment is for pollution protection during normal operation.
     if (action === 'musicUrl' && info && info.isRefresh) {
       var oldKey = _cacheKey(source, (info && info.musicInfo && info.musicInfo.songmid) || '', (info && info.type) || '');
-      if (oldKey) musicUrlCache.markFailed(oldKey);
+      if (oldKey) {
+        musicUrlCache.delete(oldKey);
+        console.log('[lx-engine] Deleted stale cache entry:', oldKey);
+      }
     }
     resolve(data);
   };

@@ -5321,6 +5321,20 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost:' + PORT);
   const pn = url.pathname;
 
+  // Handle CORS preflight (OPTIONS) requests — required for cross-origin
+  // POST requests with Content-Type: application/json from Android WebView
+  // (http://localhost → http://127.0.0.1:PORT is cross-origin in browsers).
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204, {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With',
+      'Access-Control-Max-Age': '86400',
+    });
+    res.end();
+    return;
+  }
+
   if (LOGIN_EASTER_EGG_PROTECTED_ROUTES.has(pn) && !loginEasterEggGateUnlocked()) {
     sendJSON(res, {
       ok: false,
@@ -7344,7 +7358,8 @@ const server = http.createServer(async (req, res) => {
       const coverUrl = url.searchParams.get('url');
       // URL 校验: 必须是 http(s) 开头, 否则直接 404 (不要让 fetch 抛错)
       if (!coverUrl || !/^https?:\/\//i.test(coverUrl)) {
-        res.writeHead(400, { 'Access-Control-Allow-Origin': '*' });
+        console.error('[Cover] Invalid cover URL:', coverUrl);
+        res.writeHead(400, { 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' });
         res.end('Invalid cover url');
         return;
       }
@@ -7356,6 +7371,7 @@ const server = http.createServer(async (req, res) => {
         else if (coverHost.includes('kuwo.cn')) coverReferer = 'https://www.kuwo.cn/';
         else if (coverHost.includes('kugou.com')) coverReferer = 'https://www.kugou.com/';
         else if (coverHost.includes('migu.cn')) coverReferer = 'https://music.migu.cn/';
+        else if (coverHost.includes('spotifycdn.com') || coverHost.includes('scdn.co')) coverReferer = 'https://open.spotify.com/';
       } catch(e) {}
       var coverAc = new AbortController();
       var coverTimer = setTimeout(function() { coverAc.abort(); }, 10000);
@@ -7364,11 +7380,26 @@ const server = http.createServer(async (req, res) => {
         resp = await fetch(coverUrl, { headers: { 'User-Agent': UA, 'Referer': coverReferer }, signal: coverAc.signal });
       } catch (fetchErr) {
         clearTimeout(coverTimer);
-        res.writeHead(502, { 'Access-Control-Allow-Origin': '*' });
+        console.error('[Cover] Fetch error for', coverUrl, ':', fetchErr.message || fetchErr.code || fetchErr);
+        res.writeHead(502, { 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' });
         res.end('Cover fetch failed');
         return;
       }
       clearTimeout(coverTimer);
+      if (!resp.ok && resp.status !== 304) {
+        console.warn('[Cover] Upstream returned', resp.status, 'for', coverUrl);
+        // For upstream errors, return the status but with no-cache
+        res.writeHead(resp.status, { 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' });
+        res.end();
+        return;
+      }
+      // Guard: some Node.js fetch implementations may return null body
+      if (!resp.body) {
+        console.error('[Cover] Null response body for', coverUrl);
+        res.writeHead(502, { 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' });
+        res.end('Empty cover response');
+        return;
+      }
       const ct  = resp.headers.get('content-type') || 'image/jpeg';
       const cl  = resp.headers.get('content-length');
       const hdr = {
@@ -7378,7 +7409,7 @@ const server = http.createServer(async (req, res) => {
         'Cache-Control': 'public, max-age=86400',
       };
       if (cl) hdr['Content-Length'] = cl;
-      res.writeHead(resp.status, hdr);
+      res.writeHead(200, hdr);
       const reader = resp.body.getReader();
       var coverEnded = false;
       var coverTimer2 = setTimeout(function() {
@@ -7398,7 +7429,7 @@ const server = http.createServer(async (req, res) => {
       }
       clearTimeout(coverTimer2);
       res.end();
-    } catch (err) { console.error('[Cover]', err); res.writeHead(500); res.end(); }
+    } catch (err) { console.error('[Cover] Unexpected error:', err.message || err); res.writeHead(500, { 'Cache-Control': 'no-store' }); res.end(); }
     return;
   }
 
@@ -7545,6 +7576,7 @@ const server = http.createServer(async (req, res) => {
       var lxSongId = url.searchParams.get('songId') || url.searchParams.get('id') || '';
       var lxQuality = url.searchParams.get('quality') || '320k';
       var lxHash = url.searchParams.get('hash') || '';
+      var lxRefresh = url.searchParams.get('refresh') === '1';
       if (!lxSongId) { sendJSON(res, { error: 'Missing songId' }, 400); return; }
       // Build musicInfo matching lx-music-desktop toOldMusicInfo format
       // Some source scripts (e.g. juhe) need full metadata beyond just songmid
@@ -7566,11 +7598,13 @@ const server = http.createServer(async (req, res) => {
       // Map Mineradio quality names (hires/lossless/exhigh/standard) to LX source quality names (320k/128k/flac/etc)
       var qualitiesToTry = mapLxQuality(lxQuality, lxSource);
       var lxUrlResult = null;
+      console.log('[LX SongUrl] Resolving:', lxSource, '/', lxSongId, '| qualities:', JSON.stringify(qualitiesToTry));
       for (var qi = 0; qi < qualitiesToTry.length; qi++) {
         try {
           lxUrlResult = await lxEngine.handleAction('musicUrl', lxSource, {
             musicInfo: musicInfo,
             type: qualitiesToTry[qi],
+            isRefresh: lxRefresh,
           });
           if (lxUrlResult) { lxQuality = qualitiesToTry[qi]; break; }
         } catch (e) {
@@ -7578,6 +7612,7 @@ const server = http.createServer(async (req, res) => {
           console.log('[LX SongUrl] quality ' + qualitiesToTry[qi] + ' failed, trying next...');
         }
       }
+      if (!lxUrlResult) console.warn('[LX SongUrl] ALL qualities failed for:', lxSource, '/', lxSongId);
       sendJSON(res, { provider: lxSource, url: lxUrlResult, playable: !!lxUrlResult, quality: lxQuality });
     } catch (err) {
       console.error('[LX SongUrl]', err.message);

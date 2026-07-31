@@ -1850,7 +1850,10 @@
     </div>
   </div>
 
-  <script src="js/index-loader.js"></script>
+  <script>
+    // 确保 index-loader.js 不被浏览器缓存
+    document.write('<script src="js/index-loader.js?v=' + Date.now() + '"><\/script>');
+  </script>
 </body>
 
 </html>
