@@ -109,12 +109,21 @@
   }
 
   // ── Server health check ──
+  var _bootToastShown = false;
   function check() {
     fetch(S + '/api/app/version').then(function(r) { return r.json(); }).then(function(d) {
       var wasDown = _statusFailAt > 0;
       _statusServer = 'SVR: v' + d.version + ' OK';
       _statusFailAt = 0;
       showStatus('__hide__', '#0f0');
+      // Show boot error as toast once on first successful health check
+      if (!_bootToastShown && d.bootError) {
+        _bootToastShown = true;
+        var msg = '[BOOT ERROR] ' + d.bootError;
+        console.error(msg);
+        if (typeof showToast === 'function') showToast(msg.substring(0, 200));
+        if (typeof showSourceFallbackNotice === 'function') showSourceFallbackNotice('BOOT ERROR', d.bootError);
+      }
       // On Android cold start, updateLxUI() runs before the Node.js server is
       // ready, so imported LX sources don't appear until the user toggles mode.
       // Retry once after the server becomes available.

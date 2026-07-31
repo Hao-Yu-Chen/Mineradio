@@ -5,55 +5,67 @@
 //  - 试听检测 (freeTrialInfo) + 全 quality 探测
 //  - 所有受保护 API 都会带上已登录用户的 cookie
 // ====================================================================
-const {
-  search,
-  cloudsearch,
-  song_detail,
-  song_url,
-  song_url_v1,
-  login_qr_key,
-  login_qr_create,
-  login_qr_check,
-  login_status,
-  vip_info,
-  vip_info_v2,
-  logout,
-  user_account,
-  user_playlist,
-  comment_music,
-  album,
-  artist_detail,
-  artist_top_song,
-  artist_songs,
-  like: like_song,
-  likelist,
-  song_like_check,
-  album_sub,
-  album_sublist,
-  playlist_subscribe,
-  comment,
-  comment_like,
-  scrobble,
-  listen_data_total,
-  playlist_tracks,
-  playlist_track_add,
-  playlist_create,
-  playlist_detail,
-  playlist_track_all,
-  personalized,
-  recommend_resource,
-  recommend_songs,
-  dj_detail,
-  dj_program,
-  dj_hot,
-  dj_sublist,
-  user_audio,
-  dj_paygift,
-  record_recent_voice,
-  sati_resource_sub_list,
-  lyric,
-  lyric_new,
-} = require('NeteaseCloudMusicApi');
+
+// Crash diagnostics: wrap heavy module loads so the server can still
+// start and report which module failed via /api/app/version.
+var _bootError = null;
+function _bootFail(msg) { _bootError = (_bootError || '') + msg + ' | '; console.error('[BOOT]', msg); }
+function _safeRequire(modulePath, label) {
+  try { return require(modulePath); } catch (e) {
+    _bootFail('require(' + (label || modulePath) + '): ' + (e.message || e.code || String(e)));
+    return {};
+  }
+}
+async function noopAsync() { return { body: {}, status: 503 }; }
+
+var _ncm = _safeRequire('NeteaseCloudMusicApi', 'NeteaseCloudMusicApi');
+var search = _ncm.search || noopAsync;
+var cloudsearch = _ncm.cloudsearch || noopAsync;
+var song_detail = _ncm.song_detail || noopAsync;
+var song_url = _ncm.song_url || noopAsync;
+var song_url_v1 = _ncm.song_url_v1 || noopAsync;
+var login_qr_key = _ncm.login_qr_key || noopAsync;
+var login_qr_create = _ncm.login_qr_create || noopAsync;
+var login_qr_check = _ncm.login_qr_check || noopAsync;
+var login_status = _ncm.login_status || noopAsync;
+var vip_info = _ncm.vip_info || noopAsync;
+var vip_info_v2 = _ncm.vip_info_v2 || noopAsync;
+var logout = _ncm.logout || noopAsync;
+var user_account = _ncm.user_account || noopAsync;
+var user_playlist = _ncm.user_playlist || noopAsync;
+var comment_music = _ncm.comment_music || noopAsync;
+var album = _ncm.album || noopAsync;
+var artist_detail = _ncm.artist_detail || noopAsync;
+var artist_top_song = _ncm.artist_top_song || noopAsync;
+var artist_songs = _ncm.artist_songs || noopAsync;
+var like_song = _ncm.like || noopAsync;
+var likelist = _ncm.likelist || noopAsync;
+var song_like_check = _ncm.song_like_check || noopAsync;
+var album_sub = _ncm.album_sub || noopAsync;
+var album_sublist = _ncm.album_sublist || noopAsync;
+var playlist_subscribe = _ncm.playlist_subscribe || noopAsync;
+var comment = _ncm.comment || noopAsync;
+var comment_like = _ncm.comment_like || noopAsync;
+var scrobble = _ncm.scrobble || noopAsync;
+var listen_data_total = _ncm.listen_data_total || noopAsync;
+var playlist_tracks = _ncm.playlist_tracks || noopAsync;
+var playlist_track_add = _ncm.playlist_track_add || noopAsync;
+var playlist_create = _ncm.playlist_create || noopAsync;
+var playlist_detail = _ncm.playlist_detail || noopAsync;
+var playlist_track_all = _ncm.playlist_track_all || noopAsync;
+var personalized = _ncm.personalized || noopAsync;
+var recommend_resource = _ncm.recommend_resource || noopAsync;
+var recommend_songs = _ncm.recommend_songs || noopAsync;
+var dj_detail = _ncm.dj_detail || noopAsync;
+var dj_program = _ncm.dj_program || noopAsync;
+var dj_hot = _ncm.dj_hot || noopAsync;
+var dj_sublist = _ncm.dj_sublist || noopAsync;
+var user_audio = _ncm.user_audio || noopAsync;
+var dj_paygift = _ncm.dj_paygift || noopAsync;
+var record_recent_voice = _ncm.record_recent_voice || noopAsync;
+var sati_resource_sub_list = _ncm.sati_resource_sub_list || noopAsync;
+var lyric = _ncm.lyric || noopAsync;
+var lyric_new = _ncm.lyric_new || noopAsync;
 const http = require('http');
 const https = require('https');
 const fs   = require('fs');
@@ -62,10 +74,10 @@ const crypto = require('crypto');
 const tls = require('tls');
 const { once } = require('events');
 const { fileURLToPath } = require('url');
-const { analyzePodcastDjStream, analyzePodcastDjIntro } = require('./dj-analyzer');
-const lxEngine = require('./lx-source-engine');
-const lxSearch = require('./lx-search');
-const lxPlaylist = require('./lx-playlist');
+const { analyzePodcastDjStream, analyzePodcastDjIntro } = _safeRequire('./dj-analyzer', 'dj-analyzer');
+const lxEngine = _safeRequire('./lx-source-engine', 'lx-source-engine');
+const lxSearch = _safeRequire('./lx-search', 'lx-search');
+const lxPlaylist = _safeRequire('./lx-playlist', 'lx-playlist');
 
 // Map Mineradio quality names (hires/lossless/exhigh/standard) to LX source quality names
 // LX sources use simple bitrate labels like '128k', '320k', 'flac', 'flac24bit'
@@ -106,14 +118,14 @@ function mapLxQuality(requestedQuality, source) {
   if (result.indexOf('128k') === -1) result.push('128k');
   return result;
 }
-const { TrackDecryptor } = require('./qishui-audio-decryptor/track-decryptor');
+const { TrackDecryptor } = _safeRequire('./qishui-audio-decryptor/track-decryptor', 'track-decryptor');
 const {
   normalizeQQVipPayload: normalizeQQVipPayloadStrict,
   resolveQQVipFromProbes,
   qqVipSessionCacheKey,
   qqVipCacheTtlMs,
   qqVipObjectLooksExpired: qqVipObjectLooksExpiredStrict,
-} = require('./qq-vip-api');
+} = _safeRequire('./qq-vip-api', 'qq-vip-api');
 const {
   handleKugouSearch,
   handleKugouSongUrl,
@@ -129,7 +141,7 @@ const {
   kugouCookieHasPlayback,
   extractKugouAuth,
   kugouAudioReferer,
-} = require('./kugou-api');
+} = _safeRequire('./kugou-api', 'kugou-api');
 const {
   getQishuiStatus,
   handleQishuiStatus,
@@ -151,7 +163,7 @@ const {
   handleQishuiCreateComment,
   handleQishuiLyric,
   handleQishuiSongUrl,
-} = require('./qishui-api');
+} = _safeRequire('./qishui-api', 'qishui-api');
 const {
   getSpotifyConfig,
   clearSpotifyToken,
@@ -168,7 +180,7 @@ const {
   handleSpotifyCreatePlaylist,
   handleSpotifySongUrl,
   handleSpotifyLyric,
-} = require('./spotify-api');
+} = _safeRequire('./spotify-api', 'spotify-api');
 const {
   appendCuefieldFeedback,
   readCuefieldFeedbackStats,
@@ -5350,6 +5362,7 @@ const server = http.createServer(async (req, res) => {
       name: APP_PACKAGE.name || 'mineradio',
       productName: APP_PACKAGE.productName || 'Mineradio',
       version: APP_VERSION,
+      bootError: _bootError || null,
       update: {
         provider: UPDATE_CONFIG.provider,
         configured: UPDATE_CONFIG.configured,
