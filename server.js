@@ -6924,7 +6924,7 @@ const server = http.createServer(async (req, res) => {
     try {
       var qrKeyFn = typeof login_qr_key === 'function' ? login_qr_key : noopAsync;
       var isRealFn = typeof login_qr_key === 'function';
-      var r = await qrKeyFn({ timestamp: Date.now() });
+      var r = await qrKeyFn({ timestamp: Date.now(), cookie: {} });
       var key = r.body && r.body.data && r.body.data.unikey;
       var diag = { isRealFn: isRealFn, status: r.status, hasBody: !!r.body, hasData: !!(r.body && r.body.data), keys: r.body && r.body.data ? Object.keys(r.body.data).join(',') : '' };
       if (!key) console.warn('[QR Key] empty. diag:', JSON.stringify(diag));
@@ -6938,7 +6938,7 @@ const server = http.createServer(async (req, res) => {
     try {
       var qrCreateFn = typeof login_qr_create === 'function' ? login_qr_create : noopAsync;
       var key = url.searchParams.get('key');
-      var r = await qrCreateFn({ key, qrimg: true, timestamp: Date.now() });
+      var r = await qrCreateFn({ key, qrimg: true, timestamp: Date.now(), cookie: {} });
       var d = r.body && r.body.data;
       var img = d && d.qrimg;
       if (!img) console.warn('[QR Create] got empty img. fnIsReal:', typeof login_qr_create === 'function', 'key:', key, 'd:', JSON.stringify(d || {}).substring(0, 200));
@@ -6951,14 +6951,14 @@ const server = http.createServer(async (req, res) => {
   if (pn === '/api/login/qr/check') {
     try {
       const key = url.searchParams.get('key');
-      let r = await login_qr_check({ key, noCookie: true, timestamp: Date.now() });
+      let r = await login_qr_check({ key, noCookie: true, timestamp: Date.now(), cookie: {} });
       let body = r.body || {};
       let code = Number(body.code || r.code);
       let msg  = body.message || r.message || '';
       let cookie = readCookieFromResponse(r);
       if (code === 803 && !cookie) {
         try {
-          const retry = await login_qr_check({ key, timestamp: Date.now() });
+          const retry = await login_qr_check({ key, timestamp: Date.now(), cookie: {} });
           const retryCookie = readCookieFromResponse(retry);
           if (retryCookie) {
             r = retry;
