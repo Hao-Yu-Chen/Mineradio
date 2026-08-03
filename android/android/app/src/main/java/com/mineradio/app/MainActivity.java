@@ -53,6 +53,8 @@ public class MainActivity extends BridgeActivity {
         // BridgeActivity creates the bridge inside its onCreate(),
         // which scans initialPlugins to register all plugins.
         initialPlugins.add(NeteaseLoginPlugin.class);
+        initialPlugins.add(QQLoginPlugin.class);
+        initialPlugins.add(KugouLoginPlugin.class);
 
         // Global crash catcher
         final Thread.UncaughtExceptionHandler oldHandler = Thread.getDefaultUncaughtExceptionHandler();
