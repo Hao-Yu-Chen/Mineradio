@@ -105,6 +105,7 @@ public class QQLoginWebViewActivity extends AppCompatActivity {
     private Runnable pollRunnable;
     private long startTime;
     private long lastWarmupTime = 0;
+    private int warmupRetryCount = 0;
     private boolean loginDetected = false;
     private boolean warmupStarted = false;
 
@@ -303,36 +304,48 @@ public class QQLoginWebViewActivity extends AppCompatActivity {
         try {
             CookieManager cm = CookieManager.getInstance();
             Map<String, String> allCookies = collectCookiesFromAllDomains(cm);
+            long now = System.currentTimeMillis();
 
             boolean hasUin = hasUin(allCookies);
             boolean hasPKey = hasPlaybackKey(allCookies);
             boolean hasSKey = hasWebSessionKey(allCookies);
 
-            // Both playback key AND web session key required for full login
-            if (hasUin && hasPKey && hasSKey) {
-                loginDetected = true;
-                Log.i(T, "Full login: uin + playbackKey + webSessionKey all present");
-                returnCookie(allCookies, false);
-                return;
+            if (hasUin && hasPKey) {
+                // Playback key (qm_keyst) is the critical token. p_skey is
+                // a web session cookie that the vkey API MAY also check.
+                // It is often HTTPOnly+secure, set during PTLogin redirects,
+                // and may not be visible to CookieManager even though present
+                // in HTTP traffic. We try to capture it for a few polls,
+                // then proceed anyway.
+                if (hasSKey || warmupRetryCount >= 5) {
+                    if (!hasSKey) {
+                        Log.w(T, "Proceeding without p_skey after " + warmupRetryCount + " polls");
+                    } else {
+                        Log.i(T, "Full login: uin + qm_keyst + p_skey all present");
+                    }
+                    loginDetected = true;
+                    returnCookie(allCookies, !hasSKey);
+                    return;
+                }
+                warmupRetryCount++;
+                Log.i(T, "Have qm_keyst, waiting for p_skey (poll " + warmupRetryCount + "/5)");
             }
 
-            if (hasUin && hasMusicKey(allCookies)) {
-                long now = System.currentTimeMillis();
+            if (hasUin && hasMusicKey(allCookies) && !hasPKey) {
+                // No playback key yet — need to warmup to player page
                 if (!warmupStarted || (now - lastWarmupTime > WARMUP_RETRY_MS)) {
+                    warmupRetryCount++;
                     if (!warmupStarted) {
                         warmupStarted = true;
-                        Log.i(T, "Login detected" + (hasPKey ? " (playback OK, waiting for web session key)" : ", navigating to warmup"));
+                        Log.i(T, "Login detected, navigating to player page for qm_keyst...");
                     } else {
-                        Log.i(T, "Retrying warmup" + (hasPKey ? " (have qm_keyst, need p_skey)" : " (need playback key)"));
+                        Log.i(T, "Retrying player page navigation (attempt " + warmupRetryCount + ")");
                     }
                     lastWarmupTime = now;
                     handler.post(() -> {
                         if (webView != null && !loginDetected) {
-                            // Alternate between player page (qm_keyst) and profile page (p_skey)
-                            String warmupTarget = (lastWarmupTime % (WARMUP_RETRY_MS * 2) == 0)
-                                    ? LOGIN_URL : WARMUP_URL;
-                            webView.loadUrl(warmupTarget);
-                            if (warmupStarted && lastWarmupTime == now) {
+                            webView.loadUrl(WARMUP_URL);
+                            if (!warmupStarted || warmupRetryCount <= 1) {
                                 Toast.makeText(QQLoginWebViewActivity.this,
                                         "正在获取播放授权…", Toast.LENGTH_SHORT).show();
                             }
