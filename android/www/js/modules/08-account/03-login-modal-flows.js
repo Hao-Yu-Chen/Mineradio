@@ -1139,7 +1139,11 @@ async function openQQWebLogin() {
   if (qqWebLoginBusy) return;
   var statusEl = document.getElementById('qr-status');
   var api = window.desktopWindow;
-  if (!api || !api.isDesktop || typeof api.openQQMusicLogin !== 'function') {
+
+  // Try Capacitor plugin on Android
+  var capPlugin = !(api && api.isDesktop) && window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.QQLogin;
+
+  if (!capPlugin && (!api || !api.isDesktop || typeof api.openQQMusicLogin !== 'function')) {
     qqManualCookieOpen = true;
     updateLoginProviderUi();
     if (statusEl) { statusEl.textContent = '当前环境不支持自动网页登录，可先使用手动导入。'; statusEl.className = 'fail'; }
@@ -1148,11 +1152,16 @@ async function openQQWebLogin() {
 
   qqWebLoginBusy = true;
   updateLoginProviderUi();
-  if (statusEl) { statusEl.textContent = '已打开 QQ 音乐窗口，请扫码并确认登录…'; statusEl.className = 'preview'; }
+  if (statusEl) { statusEl.textContent = capPlugin ? '已打开 QQ 音乐登录页，请扫码…' : '已打开 QQ 音乐窗口，请扫码并确认登录…'; statusEl.className = 'preview'; }
   try {
-    var result = await api.openQQMusicLogin({
-      forceReauth: !!(qqLoginStatus && qqLoginStatus.loggedIn)
-    });
+    var result;
+    if (capPlugin) {
+      result = await capPlugin.openLogin();
+    } else {
+      result = await api.openQQMusicLogin({
+        forceReauth: !!(qqLoginStatus && qqLoginStatus.loggedIn)
+      });
+    }
     if (!result || !result.ok || !result.cookie) {
       throw new Error((result && (result.message || result.error)) || 'QQ 登录未完成');
     }
@@ -1196,7 +1205,11 @@ async function openKugouWebLogin() {
   if (kugouWebLoginBusy) return;
   var statusEl = document.getElementById('qr-status');
   var api = window.desktopWindow;
-  if (!api || !api.isDesktop || typeof api.openKugouMusicLogin !== 'function') {
+
+  // Try Capacitor plugin on Android
+  var capPlugin = !(api && api.isDesktop) && window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.KugouLogin;
+
+  if (!capPlugin && (!api || !api.isDesktop || typeof api.openKugouMusicLogin !== 'function')) {
     kugouManualCookieOpen = true;
     updateLoginProviderUi();
     if (statusEl) { statusEl.textContent = '当前环境不支持自动网页登录，可先使用手动导入。'; statusEl.className = 'fail'; }
@@ -1205,9 +1218,14 @@ async function openKugouWebLogin() {
 
   kugouWebLoginBusy = true;
   updateLoginProviderUi();
-  if (statusEl) { statusEl.textContent = '已打开酷狗音乐窗口，请完成官方登录…'; statusEl.className = 'preview'; }
+  if (statusEl) { statusEl.textContent = capPlugin ? '已打开酷狗音乐登录页，请登录…' : '已打开酷狗音乐窗口，请完成官方登录…'; statusEl.className = 'preview'; }
   try {
-    var result = await api.openKugouMusicLogin();
+    var result;
+    if (capPlugin) {
+      result = await capPlugin.openLogin();
+    } else {
+      result = await api.openKugouMusicLogin();
+    }
     if (!result || !result.ok || !result.cookie) {
       throw new Error((result && (result.message || result.error)) || '酷狗登录未完成');
     }
