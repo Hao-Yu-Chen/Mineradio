@@ -898,7 +898,8 @@ function homePlatformRecommendationCard(kind, index, item, label) {
   var sub = '';
   if (kind === 'netease-playlist') sub = (item.trackCount ? item.trackCount + ' 首' : '推荐歌单') + (item.playCount ? ' · ' + compactHomeCount(item.playCount) + ' 播放' : '');
   else sub = homeDashboardSubtitle(item) || label;
-  var cover = item.cover || item.picUrl || homeDashboardSongCover(item, 180) || '';
+  var rawCover = item.cover || item.picUrl || '';
+  var cover = rawCover ? (typeof coverUrlWithSize === 'function' ? coverUrlWithSize(rawCover, 180) : rawCover) : (homeDashboardSongCover(item, 180) || '');
   var coverStyle = cover ? ' style="background-image:url(&quot;' + escHtml(cssImageUrl(cover)) + '&quot;)"' : '';
   return '<button class="home-platform-recommend-card" type="button" data-home-recommend-kind="' + kind + '" data-home-recommend-index="' + index + '">' +
     '<span class="home-platform-recommend-cover"' + coverStyle + '></span>' +

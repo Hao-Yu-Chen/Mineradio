@@ -6,6 +6,15 @@ import android.content.Intent;
 import android.graphics.Color;
 import android.net.http.SslError;
 import android.os.Bundle;
+import java.net.HttpURLConnection;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
@@ -25,11 +34,31 @@ import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
 
+import org.json.JSONObject;
+
 public class LoginWebViewActivity extends AppCompatActivity {
 
     private static final String T = "MINERADIO-LOGIN";
     private static final String LOGIN_URL = "https://music.163.com/#/login";
     private static final String COOKIE_DOMAIN = "https://music.163.com";
+    // Collect cookies from multiple Netease domains — the login flow sets
+    // cookies across subdomains (interface.music.163.com, api.music.163.com,
+    // etc.) and CookieManager.getCookie() only returns per-domain cookies.
+    private static final String[] COOKIE_DOMAINS = {
+        "https://music.163.com",
+        "https://interface.music.163.com",
+        "https://interface3.music.163.com",
+        "https://api.music.163.com",
+        "https://www.163.com",
+        "https://netease.com",
+    };
+    // Same priority order as PC Electron: important auth cookies first,
+    // then tracking, then everything else appended at the end.
+    private static final String[] COOKIE_PRIORITY = {
+        "MUSIC_U", "__csrf", "NMTID", "MUSIC_A", "MUSIC_A_T", "MUSIC_R_T",
+        "__remember_me", "_ntes_nuid", "_ntes_nnid", "WEVNSM", "WNMCID",
+        "JSESSIONID-WYYY", "_gid",
+    };
     private static final long POLL_INTERVAL_MS = 1500L;
     private static final long TIMEOUT_MS = 5 * 60 * 1000L; // 5 min
 
@@ -42,6 +71,9 @@ public class LoginWebViewActivity extends AppCompatActivity {
 
     // Required cookies that indicate a successful login
     private static final String[] LOGIN_COOKIE_MARKERS = {"MUSIC_U", "MUSIC_A"};
+    // MUSIC_U must be at least this long to be considered a complete login token.
+    // Incomplete/short MUSIC_U values are temporary and will be replaced.
+    private static final int MIN_MUSIC_U_LENGTH = 200;
 
     @SuppressLint("SetJavaScriptEnabled")
     @Override
@@ -208,71 +240,152 @@ public class LoginWebViewActivity extends AppCompatActivity {
 
         try {
             CookieManager cm = CookieManager.getInstance();
-            String cookies = cm.getCookie(COOKIE_DOMAIN);
 
-            if (cookies != null && !cookies.isEmpty()) {
-                // Check for login markers
-                boolean hasLogin = false;
+            // Check ALL Netease domains: must have MUSIC_U of sufficient length.
+            // Short MUSIC_U values are temporary/intermediate tokens set during
+            // the login redirect flow; the real token arrives later.
+            String bestMusicU = "";
+            boolean hasMarker = false;
+            for (String domain : COOKIE_DOMAINS) {
+                String cookies = cm.getCookie(domain);
+                if (cookies == null || cookies.isEmpty()) continue;
                 for (String marker : LOGIN_COOKIE_MARKERS) {
                     if (cookies.contains(marker + "=")) {
-                        hasLogin = true;
-                        break;
+                        hasMarker = true;
+                        // Extract the value to check its length
+                        String extracted = extractCookieValue(cookies, marker);
+                        if (extracted.length() > bestMusicU.length()) {
+                            bestMusicU = extracted;
+                        }
                     }
                 }
-
-                if (hasLogin) {
-                    loginDetected = true;
-                    Log.i(T, "Login detected! Cookie length: " + cookies.length());
-                    returnCookie(cookies);
-                }
             }
+
+            if (hasMarker && bestMusicU.length() >= MIN_MUSIC_U_LENGTH) {
+                        loginDetected = true;
+                returnCookie();
+            } else if (hasMarker) {
+                    }
         } catch (Exception e) {
             Log.w(T, "Cookie check failed: " + e.getMessage());
         }
     }
 
-    private void returnCookie(String cookie) {
+    private String extractCookieValue(String cookies, String key) {
+        String prefix = key + "=";
+        int start = cookies.indexOf(prefix);
+        if (start < 0) return "";
+        start += prefix.length();
+        int end = cookies.indexOf(";", start);
+        if (end < 0) end = cookies.length();
+        return cookies.substring(start, end).trim();
+    }
+
+    private void returnCookie() {
         if (pollRunnable != null) {
             handler.removeCallbacks(pollRunnable);
         }
+        CookieManager cm = CookieManager.getInstance();
+        cm.flush();
+        Log.i(T, "CookieManager flushed, collecting cookies...");
+        handler.postDelayed(() -> {
+            java.util.Map<String, String> round1 = collectCookiesFromAllDomains(cm);
+                handler.postDelayed(() -> {
+                java.util.Map<String, String> round2 = collectCookiesFromAllDomains(cm);
+                java.util.Map<String, String> finalMap = new java.util.LinkedHashMap<>(round1);
+                finalMap.putAll(round2);
+                buildAndSendCookie(finalMap);
+            }, 2500);
+        }, 500);
+    }
 
-        // Post cookie directly to the local Node.js server (port 3000)
-        // so that the login is saved regardless of Capacitor plugin state.
-        postCookieToServer(cookie);
+    private java.util.Map<String, String> collectCookiesFromAllDomains(CookieManager cm) {
+        java.util.Map<String, String> map = new java.util.LinkedHashMap<>();
+        for (String domain : COOKIE_DOMAINS) {
+            String cookies = cm.getCookie(domain);
+            if (cookies == null || cookies.isEmpty()) continue;
+            for (String part : cookies.split(";")) {
+                String trimmed = part.trim();
+                if (trimmed.isEmpty()) continue;
+                int eq = trimmed.indexOf('=');
+                if (eq <= 0) continue;
+                String key = trimmed.substring(0, eq).trim();
+                String value = trimmed.substring(eq + 1).trim();
+                // Keep first occurrence per domain scan, but allow overwrite
+                // by later domains (round2 values win over round1)
+                map.put(key, value);
+            }
+        }
+        return map;
+    }
+
+    private void buildAndSendCookie(java.util.Map<String, String> map) {
+        // Reorder: PC-priority keys first, then remaining sorted alphabetically
+        java.util.List<String> ordered = new java.util.ArrayList<>();
+        java.util.Set<String> used = new java.util.HashSet<>();
+        for (String priorityKey : COOKIE_PRIORITY) {
+            if (map.containsKey(priorityKey)) {
+                ordered.add(priorityKey + "=" + map.get(priorityKey));
+                used.add(priorityKey);
+            }
+        }
+        // Append remaining keys sorted for consistency
+        java.util.List<String> remaining = new java.util.ArrayList<>(map.keySet());
+        java.util.Collections.sort(remaining);
+        for (String key : remaining) {
+            if (!used.contains(key)) {
+                ordered.add(key + "=" + map.get(key));
+            }
+        }
+        String finalCookie = String.join("; ", ordered);
+
+
+        postCookieToServer(finalCookie);
 
         Intent resultIntent = new Intent();
         resultIntent.putExtra("ok", true);
-        resultIntent.putExtra("cookie", cookie);
+        resultIntent.putExtra("cookie", finalCookie);
         setResult(Activity.RESULT_OK, resultIntent);
 
-        Toast.makeText(this, "登录成功！", Toast.LENGTH_SHORT).show();
-        Log.i(T, "Login successful, cookie posted to server");
+        Toast.makeText(LoginWebViewActivity.this, "登录成功！", Toast.LENGTH_SHORT).show();
+        Log.i(T, "Login successful");
 
         handler.postDelayed(this::finish, 800);
     }
 
     private void postCookieToServer(final String cookie) {
         new Thread(() -> {
+            HttpURLConnection conn = null;
             try {
                 java.net.URL url = new java.net.URL("http://localhost:3000/api/login/cookie");
-                java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
+                conn = (java.net.HttpURLConnection) url.openConnection();
                 conn.setRequestMethod("POST");
                 conn.setRequestProperty("Content-Type", "application/json");
                 conn.setDoOutput(true);
-                conn.setConnectTimeout(3000);
-                conn.setReadTimeout(3000);
+                conn.setConnectTimeout(4000);
+                conn.setReadTimeout(4000);
 
-                String json = "{\"cookie\":\"" + cookie.replace("\\", "\\\\").replace("\"", "\\\"") + "\"}";
+                JSONObject json = new JSONObject();
+                json.put("cookie", cookie);
+                String jsonStr = json.toString();
+
                 java.io.OutputStream os = conn.getOutputStream();
-                os.write(json.getBytes("UTF-8"));
+                os.write(jsonStr.getBytes("UTF-8"));
                 os.flush();
                 os.close();
 
                 int code = conn.getResponseCode();
-                Log.i(T, "Server POST /api/login/cookie → HTTP " + code);
-                conn.disconnect();
+                String responseBody = "";
+                try {
+                    java.io.InputStream is = conn.getInputStream();
+                    responseBody = new java.util.Scanner(is, "UTF-8").useDelimiter("\\A").next();
+                    is.close();
+                } catch (Exception ignored) {}
+                Log.i(T, "Server POST /api/login/cookie → HTTP " + code + " body:" + responseBody.substring(0, Math.min(200, responseBody.length())));
             } catch (Exception e) {
-                Log.w(T, "Failed to post cookie to server: " + e.getMessage());
+                Log.w(T, "Failed to post cookie to server: " + e.getClass().getSimpleName() + " " + e.getMessage());
+            } finally {
+                if (conn != null) conn.disconnect();
             }
         }).start();
     }

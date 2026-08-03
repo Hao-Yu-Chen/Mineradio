@@ -17514,13 +17514,19 @@ body.panel-reordering .mini-queue-item.is-reordering {
 
 .home-platform-recommend-head {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  gap: 18px
+  gap: 14px;
+  flex-wrap: wrap
+}
+
+.home-platform-recommend-head-left {
+  flex: 0 1 auto;
+  min-width: 0
 }
 
 .home-platform-recommend-head h2 {
-  margin: 0 0 6px;
+  margin: 0 0 4px;
   font-size: 20px;
   font-weight: 780
 }
@@ -17546,14 +17552,19 @@ body.panel-reordering .mini-queue-item.is-reordering {
 
 .home-platform-recommend-tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: 7px;
-  margin-top: 18px;
+  flex: 0 1 auto;
   overflow-x: auto;
   scrollbar-width: none
 }
 
 .home-platform-recommend-tabs::-webkit-scrollbar {
   display: none
+}
+
+.home-platform-recommend-tabs button {
+  flex: 0 0 auto
 }
 
 .home-platform-recommend-tabs button,
@@ -17731,6 +17742,21 @@ body.panel-reordering .mini-queue-item.is-reordering {
 
   .home-platform-recommend-list {
     max-height: 58vh
+  }
+
+  .home-platform-recommend-tabs {
+    gap: 5px;
+    flex-wrap: nowrap;
+    -webkit-overflow-scrolling: touch
+  }
+
+  .home-platform-recommend-tabs button {
+    min-height: 32px;
+    padding: 4px 10px;
+    font-size: 10.5px;
+    letter-spacing: -0.2px;
+    line-height: 1.35;
+    flex: 0 0 auto
   }
 }
 

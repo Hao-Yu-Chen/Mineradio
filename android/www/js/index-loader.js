@@ -1,7 +1,7 @@
 'use strict';
 
 (function loadMineradioIndexModules() {
-  const moduleCacheBust = String(Date.now());
+  const moduleCacheBust = String(Date.now()) + '.' + Math.random().toString(36).slice(2, 8);
   const modulePaths = [
     'js/modules/00-state/00-core-stores.js',
     'js/modules/00-state/01-perf-render-state.js',

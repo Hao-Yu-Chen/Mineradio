@@ -530,6 +530,9 @@ function providerCookieExportLabel(provider) {
   return meta && meta.label || (provider === 'spotify' ? 'Spotify' : provider);
 }
 function offerLoginCookieExport(provider, info) {
+  // Skip on mobile/non-desktop (Capacitor Android, mobile web) —
+  // cookie export to desktop filesystem is a desktop-only feature.
+  if (typeof window.desktopWindow === 'undefined' || !window.desktopWindow.isDesktop) return;
   provider = normalizeLoginProviderKey(provider);
   if (!hasPlatformLogin(provider) && !(info && info.loggedIn)) return;
   markLoginWorkflowConnected(provider);
@@ -1117,12 +1120,10 @@ async function openNeteaseWebLogin() {
     renderUserBtn();
     refreshUserPlaylists(true);
     loadHomeDiscover(true);
-    if (statusEl) { statusEl.textContent = '网易云会话已保存'; statusEl.className = 'scan'; }
-    offerLoginCookieExport('netease', info);
-    setTimeout(function () {
-      closeLoginModal();
-      showToast('网易云已登录: ' + (info.nickname || info.userId || ''));
-    }, 420);
+    if (statusEl) { statusEl.textContent = '网易云已登录: ' + (info.nickname || info.userId || '') + ' — 可关闭窗口'; statusEl.className = 'scan'; }
+    var copyLoginBtn = document.getElementById("copy-cookie-login-btn");
+    if (copyLoginBtn) copyLoginBtn.style.display = "";
+       offerLoginCookieExport('netease', info);
   } catch (e) {
     neteaseWebLoginBusy = false;
     updateLoginProviderUi();
@@ -1451,3 +1452,4 @@ async function checkQr() {
     }
   } catch (e) { console.warn(e); }
 }
+

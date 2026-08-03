@@ -206,7 +206,11 @@ async function playHomeDaily() {
     await loadHomeDiscover(true);
   }
   if (!homeDiscoverState.songs.length) {
-    runHomeSearch('每日推荐');
+    if (!hasAnyPlatformLogin() && !homeDiscoverState.loggedIn) {
+      showLoginModal({ source: 'home-daily' });
+    } else {
+      showToast('每日推荐暂无歌曲，请稍后重试');
+    }
     return;
   }
   playQueue = homeDiscoverState.songs.map(cloneSong);

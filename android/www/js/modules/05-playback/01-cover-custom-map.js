@@ -26,27 +26,43 @@ function isInlineCoverSrc(src) {
   return typeof src === 'string' && (/^data:image\//i.test(src) || /^blob:/i.test(src));
 }
 function isProxyableCoverUrl(url) {
-  return /^https?:\/\//i.test(String(url || ''));
+  var s = String(url || '');
+  return /^https?:\/\//i.test(s) || /^\/\//.test(s);
 }
 function coverProxySrc(url, cacheBust) {
   if (!url) return '';
   if (isInlineCoverSrc(url)) return url;
+  // Normalize protocol-relative URLs (e.g. //p1.music.126.net/xxx.jpg)
+  if (/^\/\//.test(String(url))) url = 'https:' + url;
   if (!isProxyableCoverUrl(url)) return '';
   var path = '/api/cover?url=' + encodeURIComponent(url) + (cacheBust ? '&v=' + Date.now() : '');
-  // On Android/mobile, CSS background-image URLs bypass mobile-bridge patches
-  // (which only intercept Image.src / fetch / XHR). Return absolute URL so the
-  // Node.js server on port 3000 is reached directly.
-  if (typeof window.desktopWindow !== 'undefined' && window.desktopWindow.isMobile) {
+  // On Android/mobile (Capacitor or Electron Mobile), CSS background-image URLs
+  // bypass mobile-bridge patches (which only intercept Image.src / fetch / XHR).
+  // Return absolute URL so the Node.js server on port 3000 is reached directly.
+  var isMobileEnv = (typeof window.desktopWindow !== 'undefined' && window.desktopWindow.isMobile)
+    || (typeof window.Capacitor !== 'undefined');
+  if (isMobileEnv) {
     return 'http://127.0.0.1:3000' + path;
   }
   return path;
 }
 function coverUrlWithSize(url, size) {
   if (!url || isInlineCoverSrc(url) || !/^https?:\/\//i.test(url)) return url || '';
-  if (!size) return url;
-  var param = 'param=' + size + 'y' + size;
-  if (/[?&]param=\d+y\d+/i.test(url)) return url.replace(/([?&])param=\d+y\d+/i, '$1' + param);
-  return url + (url.indexOf('?') >= 0 ? '&' : '?') + param;
+  var result = url;
+  if (size) {
+    var param = 'param=' + size + 'y' + size;
+    if (/[?&]param=\d+y\d+/i.test(result)) result = result.replace(/([?&])param=\d+y\d+/i, '$1' + param);
+    else result = result + (result.indexOf('?') >= 0 ? '&' : '?') + param;
+  }
+  // On mobile (Android WebView/Capacitor), CDN cover URLs need to go through
+  // the local Node.js proxy (/api/cover) so they carry proper Referer headers.
+  // Otherwise Netease CDN (p1.music.126.net etc.) returns 403.
+  var isMobileEnv = (typeof window.desktopWindow !== 'undefined' && window.desktopWindow.isMobile)
+    || (typeof window.Capacitor !== 'undefined');
+  if (isMobileEnv && isProxyableCoverUrl(result)) {
+    return coverProxySrc(result);
+  }
+  return result;
 }
 function songCustomCoverKey(song) {
   if (!song) return '';

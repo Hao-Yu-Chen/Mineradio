@@ -511,8 +511,15 @@ function getQishuiCookieFile() {
 }
 function readConfiguredCookieFile(file) {
   try {
-    if (file && fs.existsSync(file)) return fs.readFileSync(file, 'utf8').trim();
-  } catch (_) {}
+    if (file && fs.existsSync(file)) {
+      var val = fs.readFileSync(file, 'utf8').trim();
+      console.log('[Cookie] Read', file, '(' + val.length + ' chars)');
+      return val;
+    }
+    console.log('[Cookie] File not found:', file);
+  } catch (e) {
+    console.error('[Cookie] FAILED to read', file, '—', e.message || e.code || String(e));
+  }
   return '';
 }
 function writeConfiguredCookieFile(file, value) {
@@ -520,7 +527,10 @@ function writeConfiguredCookieFile(file, value) {
     if (!file) return;
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, String(value || ''), 'utf8');
-  } catch (_) {}
+    console.log('[Cookie] Wrote', file, '(' + Buffer.byteLength(String(value || ''), 'utf8') + ' bytes)');
+  } catch (e) {
+    console.error('[Cookie] FAILED to write', file, '—', e.message || e.code || String(e));
+  }
 }
 const configuredCookieStores = {
   netease: { file: '', value: '', getFile: getCookieFile },
@@ -2968,6 +2978,9 @@ async function fetchWeatherPlaylistSongs(playlist, limit) {
 }
 
 const NETEASE_PLAYLIST_SYNC_PAGE_SIZE = 200;
+// Cached Netease userId extracted from playlist API responses when
+// login_status/user_account are unavailable (e.g., Android cold start).
+var extractedNeteaseUserId = '';
 const NETEASE_PLAYLIST_SYNC_MAX_PAGES = 80;
 const NETEASE_TRACK_SYNC_PAGE_SIZE = 500;
 const NETEASE_TRACK_SYNC_MAX_PAGES = 80;
@@ -3005,14 +3018,34 @@ async function fetchAllNeteaseUserPlaylists(uid, maxItems) {
   const seen = new Set();
   let offset = 0;
   let total = 0;
+  // Netease user IDs are numeric. If uid is not a pure numeric string,
+  // don't pass it — let the API identify the user from the cookie.
+  const effectiveUid = (uid && /^\d+$/.test(String(uid))) ? uid : undefined;
   for (let page = 0; page < NETEASE_PLAYLIST_SYNC_MAX_PAGES; page += 1) {
-    const r = await user_playlist({
-      uid,
+    const params = {
       limit: NETEASE_PLAYLIST_SYNC_PAGE_SIZE,
       offset,
       cookie: userCookie,
       timestamp: Date.now(),
-    });
+    };
+    if (effectiveUid) params.uid = effectiveUid;
+    const r = await user_playlist(params);
+    // When effectiveUid was unavailable, try to extract the real userId.
+    if (!effectiveUid && !extractedNeteaseUserId) {
+      try {
+        const _body = r.body || r || {};
+        const _raw = Array.isArray(_body.playlist) ? _body.playlist : [];
+        for (var _i = 0; _i < _raw.length; _i++) {
+          var _pl = _raw[_i];
+          var _creatorId = _pl && _pl.creator && _pl.creator.userId;
+          if (_creatorId && /^\d+$/.test(String(_creatorId))) {
+            extractedNeteaseUserId = String(_creatorId);
+            console.log('[UserPlaylists] Extracted userId:', extractedNeteaseUserId);
+            break;
+          }
+        }
+      } catch (_extractErr) { /* ignore */ }
+    }
     const body = r.body || r || {};
     const raw = Array.isArray(body.playlist) ? body.playlist : [];
     total = Number(body.total || body.count || total) || total;
@@ -3028,13 +3061,33 @@ async function fetchAllNeteaseUserPlaylists(uid, maxItems) {
 async function fetchNeteaseUserPlaylistsPage(uid, limit, offset) {
   limit = Math.max(1, Math.min(NETEASE_PLAYLIST_SYNC_PAGE_SIZE, parseInt(limit || '48', 10) || 48));
   offset = Math.max(0, parseInt(offset || '0', 10) || 0);
-  const r = await user_playlist({
-    uid,
+  // Netease user IDs are numeric. If uid is not a pure numeric string,
+  // don't pass it — let the API identify the user from the cookie.
+  const effectiveUid = (uid && /^\d+$/.test(String(uid))) ? uid : undefined;
+  const params = {
     limit,
     offset,
     cookie: userCookie,
     timestamp: Date.now(),
-  });
+  };
+  if (effectiveUid) params.uid = effectiveUid;
+  const r = await user_playlist(params);
+  // When effectiveUid was unavailable, try to extract real userId from response.
+  if (!effectiveUid && !extractedNeteaseUserId) {
+    try {
+      const _body = r.body || r || {};
+      const _raw = Array.isArray(_body.playlist) ? _body.playlist : [];
+      for (var _j = 0; _j < _raw.length; _j++) {
+        var _pl2 = _raw[_j];
+        var _cid = _pl2 && _pl2.creator && _pl2.creator.userId;
+        if (_cid && /^\d+$/.test(String(_cid))) {
+          extractedNeteaseUserId = String(_cid);
+          console.log('[UserPlaylistsPage] Extracted userId:', extractedNeteaseUserId);
+          break;
+        }
+      }
+    } catch (_extractErr2) { /* ignore */ }
+  }
   const body = r.body || r || {};
   const playlists = Array.isArray(body.playlist) ? body.playlist : [];
   const total = Math.max(Number(body.total || body.count || 0) || 0, offset + playlists.length);
@@ -5235,28 +5288,52 @@ async function fetchNeteaseLoginInfo() {
 
   // login_status 对二维码 cookie 的资料刷新通常更及时；失败时再降级到 user_account。
   try {
-    const st = await promiseWithTimeout(login_status({ cookie: userCookie, timestamp: Date.now() }), 2400, 'NETEASE_LOGIN_STATUS_TIMEOUT');
+    const st = await promiseWithTimeout(login_status({ cookie: userCookie, timestamp: Date.now() }), 8000, 'NETEASE_LOGIN_STATUS_TIMEOUT');
     const body = st.body || {};
     const data = body.data || body;
     const profile = data.profile || body.profile;
     const account = data.account || body.account;
     const info = normalizeLoginInfo(profile, account, data);
     if (info.loggedIn) return await enrichNeteaseLoginInfo(info, profile, account, data);
+    console.warn('[Login] login_status returned not-logged-in, trying user_account...');
   } catch (e) {
     console.warn('[Login] login_status failed:', e.message);
   }
 
   try {
-    const acc = await promiseWithTimeout(user_account({ cookie: userCookie, timestamp: Date.now() }), 2400, 'NETEASE_ACCOUNT_STATUS_TIMEOUT');
+    const acc = await promiseWithTimeout(user_account({ cookie: userCookie, timestamp: Date.now() }), 8000, 'NETEASE_ACCOUNT_STATUS_TIMEOUT');
     const body = acc.body || {};
     const info = normalizeLoginInfo(body.profile, body.account, body);
     if (info.loggedIn) return await enrichNeteaseLoginInfo(info, body.profile, body.account, body);
+    console.warn('[Login] user_account returned not-logged-in');
     if (isNeteaseAuthInvalidPayload(acc)) saveCookie('');
-    return { loggedIn: false, hasCookie: !!userCookie, vipType: 0, vipLevel: 'none', isVip: false, isSvip: false, vipLabel: '无VIP' };
   } catch (e) {
-    console.warn('[Login] account check failed:', e.message);
-    return { loggedIn: false, hasCookie: !!userCookie, vipType: 0, vipLevel: 'none', isVip: false, isSvip: false, vipLabel: '无VIP' };
+    console.warn('[Login] user_account failed:', e.message);
   }
+
+  // Both APIs failed or returned not-logged-in, but we have a valid cookie.
+  // Return pendingProfile so the frontend keeps the login state.
+  // Prefer extractedNeteaseUserId (from playlist API) over the cookie-based guess.
+  if (userCookie) {
+    var fallbackUserId = extractedNeteaseUserId || '';
+    if (!fallbackUserId) {
+      try {
+        var cookieObj = parseCookieString(userCookie);
+        if (cookieObj.MUSIC_U) fallbackUserId = cookieObj.MUSIC_U.substring(0, 16);
+      } catch (_) {}
+    }
+    console.warn('[Login] APIs unavailable, pendingProfile userId:', fallbackUserId || '(none)');
+    return {
+      loggedIn: true,
+      pendingProfile: true,
+      userId: fallbackUserId || '',
+      nickname: '网易云用户',
+      avatar: '',
+      vipType: 0, vipLevel: 'none', isVip: false, isSvip: false, vipLabel: '无VIP',
+    };
+  }
+
+  return { loggedIn: false, hasCookie: false, vipType: 0, vipLevel: 'none', isVip: false, isSvip: false, vipLabel: '无VIP' };
 }
 const NETEASE_LOGIN_INFO_CACHE_TTL_MS = 30 * 1000;
 let neteaseLoginInfoCache = { cookie: '', at: 0, value: null, promise: null };
@@ -5266,7 +5343,10 @@ function clearNeteaseLoginInfoCache() {
 async function getLoginInfo() {
   if (!userCookie) return { loggedIn: false, vipType: 0, vipLevel: 'none', isVip: false, isSvip: false, vipLabel: '无VIP' };
   const cookieKey = userCookie;
-  if (neteaseLoginInfoCache.cookie === cookieKey && neteaseLoginInfoCache.value && Date.now() - neteaseLoginInfoCache.at < NETEASE_LOGIN_INFO_CACHE_TTL_MS) {
+  // Don't serve cached pendingProfile — retry APIs to get a real userId.
+  if (neteaseLoginInfoCache.cookie === cookieKey && neteaseLoginInfoCache.value
+      && !neteaseLoginInfoCache.value.pendingProfile
+      && Date.now() - neteaseLoginInfoCache.at < NETEASE_LOGIN_INFO_CACHE_TTL_MS) {
     return neteaseLoginInfoCache.value;
   }
   if (neteaseLoginInfoCache.cookie === cookieKey && neteaseLoginInfoCache.promise) return neteaseLoginInfoCache.promise;
@@ -5274,7 +5354,8 @@ async function getLoginInfo() {
     if (userCookie === cookieKey) {
       neteaseLoginInfoCache.cookie = cookieKey;
       neteaseLoginInfoCache.at = Date.now();
-      neteaseLoginInfoCache.value = info;
+      // Don't cache pendingProfile — force retry next time to get real userId.
+      if (!info.pendingProfile) neteaseLoginInfoCache.value = info;
     }
     return info;
   }).finally(() => {
@@ -7022,11 +7103,14 @@ const server = http.createServer(async (req, res) => {
   if (pn === '/api/user/playlists') {
     try {
       const info = await getLoginInfo();
-      if (!info.loggedIn || !info.userId) { sendJSON(res, { loggedIn: false, playlists: [] }); return; }
+      if (!info.loggedIn) { sendJSON(res, { loggedIn: false, playlists: [] }); return; }
+      // Allow pendingProfile — userId may be a fallback, but user_playlist
+      // identifies the user via the cookie, so it should still work.
+      var uid = info.userId || '';
       const requestedLimit = Math.max(0, parseInt(url.searchParams.get('limit') || '0', 10) || 0);
       const requestedOffset = Math.max(0, parseInt(url.searchParams.get('offset') || '0', 10) || 0);
       if (requestedLimit || requestedOffset || url.searchParams.has('paged')) {
-        const pageData = await fetchNeteaseUserPlaylistsPage(info.userId, requestedLimit || 48, requestedOffset);
+        const pageData = await fetchNeteaseUserPlaylistsPage(uid, requestedLimit || 48, requestedOffset);
         const pageList = pageData.playlists.map(pl => mapNeteasePlaylistMeta(pl, pl && pl.id));
         sendJSON(res, {
           loggedIn: true,
@@ -7041,9 +7125,9 @@ const server = http.createServer(async (req, res) => {
         });
         return;
       }
-      const rawPlaylists = await fetchAllNeteaseUserPlaylists(info.userId, requestedLimit);
+      const rawPlaylists = await fetchAllNeteaseUserPlaylists(uid, requestedLimit);
       const list = rawPlaylists.map(pl => mapNeteasePlaylistMeta(pl, pl && pl.id));
-      sendJSON(res, { loggedIn: true, userId: info.userId, playlists: list });
+      sendJSON(res, { loggedIn: true, userId: uid, playlists: list });
     } catch (err) {
       console.error('[UserPlaylists]', err);
       sendJSON(res, { error: err.message, loggedIn: false, playlists: [] }, 500);

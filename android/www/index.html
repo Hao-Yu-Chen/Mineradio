@@ -282,20 +282,20 @@
       aria-labelledby="home-platform-recommend-title">
       <div class="modal home-platform-recommend-modal">
         <div class="home-platform-recommend-head">
-          <div>
+          <div class="home-platform-recommend-head-left">
             <h2 id="home-platform-recommend-title">平台推荐</h2>
             <p>只读取平台可验证的推荐数据，不用关键词搜索替代。</p>
           </div>
+          <div id="home-platform-recommend-tabs" class="home-platform-recommend-tabs" role="tablist"
+            aria-label="推荐平台">
+            <button type="button" role="tab" data-home-recommend-source="netease" aria-selected="true">网易云</button>
+            <button type="button" role="tab" data-home-recommend-source="qishui" aria-selected="false">汽水</button>
+            <button type="button" role="tab" data-home-recommend-source="qq" aria-selected="false">QQ</button>
+            <button type="button" role="tab" data-home-recommend-source="kugou" aria-selected="false">酷狗</button>
+            <button type="button" role="tab" data-home-recommend-source="spotify" aria-selected="false">Spotify</button>
+          </div>
           <button id="home-platform-recommend-close" class="home-platform-recommend-close" type="button"
             aria-label="关闭平台推荐">×</button>
-        </div>
-        <div id="home-platform-recommend-tabs" class="home-platform-recommend-tabs" role="tablist"
-          aria-label="推荐平台">
-          <button type="button" role="tab" data-home-recommend-source="netease" aria-selected="true">网易云</button>
-          <button type="button" role="tab" data-home-recommend-source="qishui" aria-selected="false">汽水</button>
-          <button type="button" role="tab" data-home-recommend-source="qq" aria-selected="false">QQ</button>
-          <button type="button" role="tab" data-home-recommend-source="kugou" aria-selected="false">酷狗</button>
-          <button type="button" role="tab" data-home-recommend-source="spotify" aria-selected="false">Spotify</button>
         </div>
         <div id="home-platform-recommend-status" class="home-platform-recommend-status" role="status"
           aria-live="polite"></div>
@@ -1850,8 +1850,11 @@
     </div>
   </div>
 
-  <script src="js/index-loader.js"></script>
-  <script src="mobile-bridge.js"></script>
+  <script>
+    // 确保 index-loader.js 不被浏览器缓存
+    document.write('<script src="js/index-loader.js?v=' + Date.now() + '"><\/script>');
+  </script>
+<script src="mobile-bridge.js"></script>
 </body>
 
 </html>

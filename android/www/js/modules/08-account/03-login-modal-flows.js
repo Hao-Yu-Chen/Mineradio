@@ -530,6 +530,9 @@ function providerCookieExportLabel(provider) {
   return meta && meta.label || (provider === 'spotify' ? 'Spotify' : provider);
 }
 function offerLoginCookieExport(provider, info) {
+  // Skip on mobile/non-desktop (Capacitor Android, mobile web) —
+  // cookie export to desktop filesystem is a desktop-only feature.
+  if (typeof window.desktopWindow === 'undefined' || !window.desktopWindow.isDesktop) return;
   provider = normalizeLoginProviderKey(provider);
   if (!hasPlatformLogin(provider) && !(info && info.loggedIn)) return;
   markLoginWorkflowConnected(provider);
@@ -1117,12 +1120,10 @@ async function openNeteaseWebLogin() {
     renderUserBtn();
     refreshUserPlaylists(true);
     loadHomeDiscover(true);
-    if (statusEl) { statusEl.textContent = '网易云会话已保存'; statusEl.className = 'scan'; }
-    offerLoginCookieExport('netease', info);
-    setTimeout(function () {
-      closeLoginModal();
-      showToast('网易云已登录: ' + (info.nickname || info.userId || ''));
-    }, 420);
+    if (statusEl) { statusEl.textContent = '网易云已登录: ' + (info.nickname || info.userId || '') + ' — 可关闭窗口'; statusEl.className = 'scan'; }
+    var copyLoginBtn = document.getElementById("copy-cookie-login-btn");
+    if (copyLoginBtn) copyLoginBtn.style.display = "";
+       offerLoginCookieExport('netease', info);
   } catch (e) {
     neteaseWebLoginBusy = false;
     updateLoginProviderUi();
@@ -1406,12 +1407,36 @@ async function submitNeteaseCookieLogin() {
     renderUserBtn();
     refreshUserPlaylists(true);
     loadHomeDiscover(true);
-    if (statusEl) { statusEl.textContent = '网易云会话已保存'; statusEl.className = 'scan'; }
+    if (statusEl) { statusEl.textContent = '网易云已登录: ' + (info.nickname || info.userId || '') + ' — 可关闭窗口'; statusEl.className = 'scan'; }
+    var copyLoginBtn = document.getElementById("copy-cookie-login-btn");
+    if (copyLoginBtn) copyLoginBtn.style.display = "";
+    // Replace QR area with a visible copy button
+    var qrShell = document.getElementById('qr-shell');
+    if (qrShell && window.__mineradioCapturedCookie) {
+      qrShell.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:160px;gap:14px">' +
+        '<div style="font-size:42px">✅</div>' +
+        '<div style="color:rgba(255,255,255,.7);font-size:13px">' + (info.nickname || '网易云用户') + '</div>' +
+        '<button id="copy-cookie-btn" style="padding:10px 28px;border-radius:10px;border:1px solid rgba(255,255,255,.22);background:rgba(255,255,255,.1);color:#fff;font-size:14px;font-weight:600;cursor:pointer;letter-spacing:0.5px">📋 复制 Cookie 到剪贴板</button>' +
+        '<div style="color:rgba(255,255,255,.35);font-size:10px">共 ' + window.__mineradioCapturedCookie.length + ' 字符</div>' +
+        '</div>';
+      setTimeout(function () {
+        var copyBtn = document.getElementById('copy-cookie-btn');
+        if (copyBtn) {
+          copyBtn.addEventListener('click', function (ev) {
+            ev.stopPropagation();
+            var c = window.__mineradioCapturedCookie;
+            var ta = document.createElement('textarea');
+            ta.value = c; ta.style.position = 'fixed'; ta.style.opacity = '0';
+            document.body.appendChild(ta); ta.select();
+            document.execCommand('copy'); document.body.removeChild(ta);
+            copyBtn.textContent = '✅ 已复制！';
+            copyBtn.style.background = 'rgba(0,245,130,.18)';
+            showToast('Cookie 已复制 (' + c.length + ' 字符)', 2500);
+          });
+        }
+      }, 300);
+    }
     offerLoginCookieExport('netease', info);
-    setTimeout(function () {
-      closeLoginModal();
-      showToast('网易云已登录: ' + (info.nickname || info.userId || ''));
-    }, 420);
   } catch (e) {
     if (statusEl) { statusEl.textContent = e && e.message ? e.message : '网易云会话保存失败'; statusEl.className = 'fail'; }
   } finally {
@@ -1451,3 +1476,4 @@ async function checkQr() {
     }
   } catch (e) { console.warn(e); }
 }
+
