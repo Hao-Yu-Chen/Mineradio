@@ -49,6 +49,11 @@ public class MainActivity extends BridgeActivity {
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
+        // Must add custom plugins BEFORE super.onCreate() because
+        // BridgeActivity creates the bridge inside its onCreate(),
+        // which scans initialPlugins to register all plugins.
+        initialPlugins.add(NeteaseLoginPlugin.class);
+
         // Global crash catcher
         final Thread.UncaughtExceptionHandler oldHandler = Thread.getDefaultUncaughtExceptionHandler();
         Thread.setDefaultUncaughtExceptionHandler((t, e) -> {

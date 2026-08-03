@@ -720,6 +720,13 @@ function updateLoginProviderUi() {
   var qishuiBtn = document.getElementById('login-provider-qishui');
   var qqCookieSaveBtn = document.getElementById('qq-cookie-save-btn');
   var canOpenNeteaseWeb = !!(window.desktopWindow && window.desktopWindow.isDesktop && typeof window.desktopWindow.openNeteaseMusicLogin === 'function');
+  var canOpenNeteaseCapacitor = !!(
+    !canOpenNeteaseWeb &&
+    window.Capacitor && window.Capacitor.Plugins &&
+    window.Capacitor.Plugins.NeteaseLogin &&
+    typeof window.Capacitor.Plugins.NeteaseLogin.openLogin === 'function'
+  );
+  var canOpenNeteaseOfficial = canOpenNeteaseWeb || canOpenNeteaseCapacitor;
   var hasQishuiLocalImportBridge = !!(window.desktopWindow && typeof window.desktopWindow.openQishuiMusicLogin === 'function');
   var canOpenQishuiOfficialWindow = hasQishuiLocalImportBridge;
   var qishuiSearchReady = qishuiPublicSearchReady();
@@ -801,15 +808,15 @@ function updateLoginProviderUi() {
       ? (hasQishuiLocalImportBridge
         ? '读取本机 <b>汽水音乐 PC 客户端</b> 的当前登录态，导入后可同步我的喜欢、歌单并解析播放地址。'
         : '本地汽水登录态只能由 Mineradio 桌面版读取；请在桌面版中完成导入。')
-    : (canOpenNeteaseWeb
+    : (canOpenNeteaseOfficial
       ? '打开 <b>网易云音乐官方网页登录窗口</b> 扫码，避开接口二维码风控；成功后会自动同步账号会话。'
       : '使用 <b>网易云音乐 App</b> 扫码，可同步歌单、红心与播客。')));
   var manualCookieOpen = isManualCookieOpenForProvider(loginProvider);
   if (shell) {
-    var useWebPreview = isQQ || isKugou || isQishui || (isNetease && (canOpenNeteaseWeb || manualCookieOpen));
+    var useWebPreview = isQQ || isKugou || isQishui || (isNetease && (canOpenNeteaseOfficial || manualCookieOpen));
     shell.classList.toggle('web-login-preview', useWebPreview);
     shell.classList.toggle('qq-preview', isQQ);
-    shell.classList.toggle('netease-preview', isNetease && canOpenNeteaseWeb);
+    shell.classList.toggle('netease-preview', isNetease && canOpenNeteaseOfficial);
   }
   if (qqPanel) qqPanel.classList.toggle('show', isManualCookieProvider && manualCookieOpen);
   if (qqCookieToggle) {
@@ -837,14 +844,14 @@ function updateLoginProviderUi() {
         ? (kugouLoginStatus.loggedIn ? ('已保存酷狗音乐会话 · ' + (kugouLoginStatus.nickname || '')) : '点击“登录”打开酷狗音乐官方窗口')
         : (isQishui
           ? qishuiLoginStatusText()
-        : (canOpenNeteaseWeb ? '点击“网页登录”打开网易云官方窗口' : '正在生成二维码…')));
+        : (canOpenNeteaseOfficial ? '点击“网页登录”打开网易云官方窗口' : '正在生成二维码…')));
   }
   if (refreshBtn) {
     refreshBtn.disabled = isQishui ? (qishuiBusy || !canOpenQishuiOfficialWindow) : (isQQ ? !!qqWebLoginBusy : (isKugou ? !!kugouWebLoginBusy : !!neteaseWebLoginBusy));
     var qqNeedsAuthRefresh = isQQ && qqLoginNeedsAuthorizationRefresh(qqLoginStatus);
     var qqNeedsMembershipSync = isQQ && qqLoginStatus.loggedIn && !hasProviderVip('qq', qqLoginStatus);
-    refreshBtn.textContent = isQishui ? (qishuiOAuthBusy ? '正在读取…' : (qishuiTokenBusy ? '保存中…' : '读取本机汽水')) : (isQQ ? (qqWebLoginBusy ? '等待扫码…' : (qqNeedsAuthRefresh ? '重新授权' : (qqNeedsMembershipSync ? '同步会员' : (qqLoginStatus.loggedIn ? '刷新状态' : '扫码登录')))) : (isKugou ? (kugouWebLoginBusy ? '等待登录…' : '登录') : (canOpenNeteaseWeb ? (neteaseWebLoginBusy ? '等待扫码…' : '网页登录') : '刷新二维码')));
-    refreshBtn.onclick = isQishui ? openQishuiWebLogin : (isQQ ? ((qqNeedsAuthRefresh || qqNeedsMembershipSync) ? openQQWebLogin : (qqLoginStatus.loggedIn ? refreshQr : openQQWebLogin)) : (isKugou ? openKugouWebLogin : (canOpenNeteaseWeb ? openNeteaseWebLogin : refreshQr)));
+    refreshBtn.textContent = isQishui ? (qishuiOAuthBusy ? '正在读取…' : (qishuiTokenBusy ? '保存中…' : '读取本机汽水')) : (isQQ ? (qqWebLoginBusy ? '等待扫码…' : (qqNeedsAuthRefresh ? '重新授权' : (qqNeedsMembershipSync ? '同步会员' : (qqLoginStatus.loggedIn ? '刷新状态' : '扫码登录')))) : (isKugou ? (kugouWebLoginBusy ? '等待登录…' : '登录') : (canOpenNeteaseOfficial ? (neteaseWebLoginBusy ? '等待扫码…' : '网页登录') : '刷新二维码')));
+    refreshBtn.onclick = isQishui ? openQishuiWebLogin : (isQQ ? ((qqNeedsAuthRefresh || qqNeedsMembershipSync) ? openQQWebLogin : (qqLoginStatus.loggedIn ? refreshQr : openQQWebLogin)) : (isKugou ? openKugouWebLogin : (canOpenNeteaseOfficial ? openNeteaseWebLogin : refreshQr)));
   }
   if (isQishui && canOpenQishuiOfficialWindow) {
     if (qqCard) {
@@ -1057,25 +1064,53 @@ async function openNeteaseWebLogin() {
   if (neteaseWebLoginBusy) return;
   var statusEl = document.getElementById('qr-status');
   var api = window.desktopWindow;
-  if (!api || !api.isDesktop || typeof api.openNeteaseMusicLogin !== 'function') {
+
+  // Try Capacitor plugin on Android
+  var capPlugin = !(api && api.isDesktop) && window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.NeteaseLogin;
+
+  if (!capPlugin && (!api || !api.isDesktop || typeof api.openNeteaseMusicLogin !== 'function')) {
     if (statusEl) { statusEl.textContent = '当前环境不支持官方网页登录，正在尝试旧二维码…'; statusEl.className = 'fail'; }
     return refreshQr();
   }
 
   neteaseWebLoginBusy = true;
   updateLoginProviderUi();
-  if (statusEl) { statusEl.textContent = '已打开网易云窗口，请在官方页面扫码登录…'; statusEl.className = 'preview'; }
+  if (statusEl) { statusEl.textContent = '已打开网易云窗口，请在官方页面登录…'; statusEl.className = 'preview'; }
   try {
-    var result = await api.openNeteaseMusicLogin();
-    if (!result || !result.ok || !result.cookie) {
+    var result;
+    if (capPlugin) {
+      result = await capPlugin.openLogin();
+      // If the plugin returned but cookie is already saved (direct server POST),
+      // just verify login status instead of re-saving
+      if (result && (!result.ok || !result.cookie)) {
+        // LoginWebViewActivity may have already posted cookie to server directly
+        if (statusEl) { statusEl.textContent = '正在检查登录状态…'; statusEl.className = 'preview'; }
+        var directStatus = await apiJson('/api/login/status');
+        if (directStatus && directStatus.loggedIn) {
+          result = { ok: true, cookie: 'direct-server', _direct: true };
+        }
+      }
+    } else {
+      result = await api.openNeteaseMusicLogin();
+    }
+    if (!result || !result.ok) {
       throw new Error((result && (result.message || result.error)) || '网易云登录未完成');
     }
-    if (statusEl) { statusEl.textContent = '正在同步网易云会话…'; statusEl.className = 'preview'; }
-    var info = await apiJson('/api/login/cookie', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cookie: result.cookie })
-    });
+    // If cookie was already saved by LoginWebViewActivity, skip POST
+    var info;
+    if (result._direct) {
+      info = result._directInfo || await apiJson('/api/login/status');
+    } else if (result.cookie && result.cookie !== 'direct-server') {
+      if (statusEl) { statusEl.textContent = '正在同步网易云会话…'; statusEl.className = 'preview'; }
+      info = await apiJson('/api/login/cookie', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cookie: result.cookie })
+      });
+    } else {
+      // Cookie was already posted; check login status
+      info = await apiJson('/api/login/status');
+    }
     if (!info || !info.loggedIn) throw new Error((info && (info.message || info.error)) || '网易云会话不可用');
     loginStatus = info;
     activeAccountProvider = 'netease';
