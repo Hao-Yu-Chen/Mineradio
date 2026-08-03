@@ -58,14 +58,18 @@ public class QQLoginPlugin extends Plugin {
         if (resultCode == android.app.Activity.RESULT_OK && data != null) {
             boolean ok = data.getBooleanExtra("ok", false);
             String cookie = data.getStringExtra("cookie");
+            boolean partial = data.getBooleanExtra("partial", false);
 
             JSObject ret = new JSObject();
             ret.put("ok", ok);
             if (cookie != null) {
                 ret.put("cookie", cookie);
             }
+            if (partial) {
+                ret.put("partial", true);
+            }
             call.resolve(ret);
-            Log.i(T, "Login result: ok=" + ok + " cookieLen=" + (cookie != null ? cookie.length() : 0));
+            Log.i(T, "Login result: ok=" + ok + " partial=" + partial + " cookieLen=" + (cookie != null ? cookie.length() : 0));
         } else {
             JSObject ret = new JSObject();
             ret.put("ok", false);
