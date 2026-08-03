@@ -10,6 +10,50 @@ var loginWorkflowEdgeRenderFrame = 0;
 var loginWorkflowEdgeRenderTimers = [];
 var SPOTIFY_DEVELOPER_DASHBOARD_URL = 'https://developer.spotify.com/dashboard';
 var SPOTIFY_REDIRECT_URI = 'http://127.0.0.1:43879/callback';
+var lastCapturedQQCookie = '';
+var lastCapturedKugouCookie = '';
+
+function copyCapturedQQCookie() {
+  var cookie = lastCapturedQQCookie;
+  if (!cookie) {
+    showToast('暂未捕获到 QQ Cookie，请先完成扫码登录');
+    return;
+  }
+  copyTextToClipboard(cookie);
+  showToast('QQ Cookie 已复制到剪贴板（' + cookie.length + ' 字符）');
+}
+
+function copyCapturedKugouCookie() {
+  var cookie = lastCapturedKugouCookie;
+  if (!cookie) {
+    showToast('暂未捕获到酷狗 Cookie，请先完成登录');
+    return;
+  }
+  copyTextToClipboard(cookie);
+  showToast('酷狗 Cookie 已复制到剪贴板（' + cookie.length + ' 字符）');
+}
+
+function copyTextToClipboard(text) {
+  if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+    navigator.clipboard.writeText(text).catch(function() {
+      fallbackCopyText(text);
+    });
+  } else {
+    fallbackCopyText(text);
+  }
+}
+
+function fallbackCopyText(text) {
+  var ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.left = '-9999px';
+  ta.style.top = '-9999px';
+  document.body.appendChild(ta);
+  ta.select();
+  try { document.execCommand('copy'); } catch (e) {}
+  document.body.removeChild(ta);
+}
 
 function isLoginRefreshCurrent(provider, seq) {
   return loginProvider === provider && loginRefreshRequestSeq === seq;
@@ -826,6 +870,12 @@ function updateLoginProviderUi() {
     qqCookieToggle.classList.toggle('show', isManualCookieProvider);
     qqCookieToggle.textContent = manualCookieOpen ? '收起导入' : (isQishui ? 'Token 导入' : 'Cookie 导入');
   }
+  var qqCopyBtn = document.getElementById('qq-copy-cookie-btn');
+  if (qqCopyBtn) {
+    qqCopyBtn.style.display = (isQQ || isKugou) ? '' : 'none';
+    if (isKugou) qqCopyBtn.setAttribute('onclick', 'copyCapturedKugouCookie()');
+    else qqCopyBtn.setAttribute('onclick', 'copyCapturedQQCookie()');
+  }
   if (qqCookieInput) qqCookieInput.placeholder = isQishui ? 'access-token / Bearer ...' : (isKugou ? 'KuGoo=...; token=...; userid=...; kg_mid=...' : (isNetease ? 'MUSIC_U=...; __csrf=...' : 'uin=...; qqmusic_key=...; qm_keyst=...'));
   if (qqCookieNote) qqCookieNote.textContent = isQishui ? (qishuiLoginStatus.oauthConfigured ? '备用入口：也可以粘贴抖音开放平台 access-token，需要 luna.openapi.platform.play_core 权限。' : '可选：粘贴 access-token 后增强官方推荐；不粘贴也能用汽水搜索匹配。') : (isKugou ? '从 kugou.com 的登录会话导入。' : (isNetease ? '从 music.163.com 的登录会话导入。' : '从 y.qq.com 的登录会话导入。'));
   if (qqCookieSaveBtn) qqCookieSaveBtn.textContent = isQishui ? '保存授权' : '保存 Cookie';
@@ -1165,6 +1215,10 @@ async function openQQWebLogin() {
     if (!result || !result.ok || !result.cookie) {
       throw new Error((result && (result.message || result.error)) || 'QQ 登录未完成');
     }
+    // Store captured cookie for debugging (copy button)
+    lastCapturedQQCookie = result.cookie;
+    var copyBtn = document.getElementById('qq-copy-cookie-btn');
+    if (copyBtn) { copyBtn.style.display = ''; }
     if (statusEl) { statusEl.textContent = '正在同步 QQ 音乐会话…'; statusEl.className = 'preview'; }
     var info = await apiJson('/api/qq/login/cookie', {
       method: 'POST',
@@ -1229,6 +1283,8 @@ async function openKugouWebLogin() {
     if (!result || !result.ok || !result.cookie) {
       throw new Error((result && (result.message || result.error)) || '酷狗登录未完成');
     }
+    // Store captured cookie for debugging (copy button)
+    lastCapturedKugouCookie = result.cookie;
     if (statusEl) { statusEl.textContent = '正在同步酷狗音乐会话…'; statusEl.className = 'preview'; }
     var info = await apiJson('/api/kugou/login/cookie', {
       method: 'POST',
