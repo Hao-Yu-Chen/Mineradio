@@ -41,19 +41,34 @@ public class QQLoginWebViewActivity extends AppCompatActivity {
     // Match PC Electron QQ_LOGIN_URL: the profile page shows the login QR directly
     private static final String LOGIN_URL = "https://y.qq.com/n/ryqq/profile";
     private static final String WARMUP_URL = "https://y.qq.com/n/ryqq/player";
-    // Collect cookies from all QQ Music related domains (matching PC isQQCookieDomain)
+    // Collect cookies from ALL QQ-related domains including PTLogin chain
+    // PC Electron reads the ENTIRE session cookie store; Android CookieManager
+    // only returns per-domain, so we must be exhaustive.
     private static final String[] COOKIE_DOMAINS = {
+        // QQ Music main domains
         "https://y.qq.com",
         "https://c.y.qq.com",
         "https://u.y.qq.com",
         "https://i.y.qq.com",
         "https://qqmusic.qq.com",
         "https://music.qq.com",
-        "https://qq.com",
-        "https://graph.qq.com",
+        // PTLogin chain (where p_skey, skey, pt4_token etc. are set)
         "https://ptlogin2.qq.com",
         "https://ssl.ptlogin2.qq.com",
+        "https://xui.ptlogin2.qq.com",
+        "https://ptlogin4.qq.com",
+        "https://graph.qq.com",
         "https://open.qq.com",
+        "https://connect.qq.com",
+        "https://ids.qq.com",
+        "https://auth.qq.com",
+        // Root qq.com (catches .qq.com-domain cookies)
+        "https://qq.com",
+        "http://qq.com",
+    };
+    // Additional PTLogin-specific cookies that must be present for playback
+    private static final String[] REQUIRED_WEB_SESSION_COOKIES = {
+        "p_skey", "skey", "pt4_token"
     };
     // Domain score matching PC Electron qqLoginCookieCandidateScore:
     // y.qq.com = 400, qqmusic.qq.com = 360, qq.com = 240, *.qq.com = 160
@@ -272,6 +287,16 @@ public class QQLoginWebViewActivity extends AppCompatActivity {
         return false;
     }
 
+    private boolean hasWebSessionKey(Map<String, String> map) {
+        // p_skey or skey is required for the QQ Music API to accept the
+        // vkey request. qm_keyst handles music auth, but the web session
+        // must also be valid.
+        for (String key : REQUIRED_WEB_SESSION_COOKIES) {
+            if (map.containsKey(key) && map.get(key).length() > 0) return true;
+        }
+        return false;
+    }
+
     private void checkCookies() {
         if (loginDetected) return;
 
@@ -279,30 +304,35 @@ public class QQLoginWebViewActivity extends AppCompatActivity {
             CookieManager cm = CookieManager.getInstance();
             Map<String, String> allCookies = collectCookiesFromAllDomains(cm);
 
-            if (hasUin(allCookies) && hasPlaybackKey(allCookies)) {
-                // Full login: uin + playback key both present
+            boolean hasUin = hasUin(allCookies);
+            boolean hasPKey = hasPlaybackKey(allCookies);
+            boolean hasSKey = hasWebSessionKey(allCookies);
+
+            // Both playback key AND web session key required for full login
+            if (hasUin && hasPKey && hasSKey) {
                 loginDetected = true;
+                Log.i(T, "Full login: uin + playbackKey + webSessionKey all present");
                 returnCookie(allCookies, false);
                 return;
             }
 
-            if (hasUin(allCookies) && hasMusicKey(allCookies)) {
+            if (hasUin && hasMusicKey(allCookies)) {
                 long now = System.currentTimeMillis();
-                // Start warmup on first detection, and retry every WARMUP_RETRY_MS
-                // until playback key appears (PC Electron polls continuously after warmup)
                 if (!warmupStarted || (now - lastWarmupTime > WARMUP_RETRY_MS)) {
                     if (!warmupStarted) {
                         warmupStarted = true;
-                        Log.i(T, "Login detected, navigating to warmup URL for playback key...");
+                        Log.i(T, "Login detected" + (hasPKey ? " (playback OK, waiting for web session key)" : ", navigating to warmup"));
                     } else {
-                        Log.i(T, "Playback key still missing, retrying warmup navigation...");
+                        Log.i(T, "Retrying warmup" + (hasPKey ? " (have qm_keyst, need p_skey)" : " (need playback key)"));
                     }
                     lastWarmupTime = now;
-                    final boolean isRetry = warmupStarted; // already true on first call via !warmupStarted above
                     handler.post(() -> {
                         if (webView != null && !loginDetected) {
-                            webView.loadUrl(WARMUP_URL);
-                            if (!isRetry) {
+                            // Alternate between player page (qm_keyst) and profile page (p_skey)
+                            String warmupTarget = (lastWarmupTime % (WARMUP_RETRY_MS * 2) == 0)
+                                    ? LOGIN_URL : WARMUP_URL;
+                            webView.loadUrl(warmupTarget);
+                            if (warmupStarted && lastWarmupTime == now) {
                                 Toast.makeText(QQLoginWebViewActivity.this,
                                         "正在获取播放授权…", Toast.LENGTH_SHORT).show();
                             }
@@ -330,28 +360,14 @@ public class QQLoginWebViewActivity extends AppCompatActivity {
     private Map<String, String> collectCookiesFromAllDomains(CookieManager cm) {
         // Collect with per-key scoring: prefer y.qq.com over qq.com (match PC Electron)
         Map<String, CookieEntry> scored = new LinkedHashMap<>();
+
+        // Also include cookies from the WebView's current URL (most comprehensive)
+        if (webView != null && webView.getUrl() != null) {
+            collectFromUrl(cm, webView.getUrl(), scored);
+        }
+
         for (String domain : COOKIE_DOMAINS) {
-            String cookies = cm.getCookie(domain);
-            if (cookies == null || cookies.isEmpty()) continue;
-            int score = domainScore(domain);
-            for (String part : cookies.split(";")) {
-                String trimmed = part.trim();
-                if (trimmed.isEmpty()) continue;
-                int eq = trimmed.indexOf('=');
-                if (eq <= 0) continue;
-                String key = trimmed.substring(0, eq).trim();
-                String value = trimmed.substring(eq + 1).trim();
-                CookieEntry existing = scored.get(key);
-                if (existing == null || score > existing.score) {
-                    // Higher domain score wins (y.qq.com > qq.com)
-                    scored.put(key, new CookieEntry(domain, value, score));
-                } else if (score == existing.score) {
-                    // Same score: longer value typically means newer/more complete cookie
-                    if (value.length() > existing.value.length()) {
-                        scored.put(key, new CookieEntry(domain, value, score));
-                    }
-                }
-            }
+            collectFromUrl(cm, domain, scored);
         }
         // Convert to simple map
         Map<String, String> result = new LinkedHashMap<>();
@@ -359,6 +375,44 @@ public class QQLoginWebViewActivity extends AppCompatActivity {
             result.put(e.getKey(), e.getValue().value);
         }
         return result;
+    }
+
+    private void collectFromUrl(CookieManager cm, String url, Map<String, CookieEntry> scored) {
+        String cookies = cm.getCookie(url);
+        if (cookies == null || cookies.isEmpty()) return;
+        int score = domainScore(url);
+        for (String part : cookies.split(";")) {
+            String trimmed = part.trim();
+            if (trimmed.isEmpty()) continue;
+            int eq = trimmed.indexOf('=');
+            if (eq <= 0) continue;
+            String key = trimmed.substring(0, eq).trim();
+            String value = trimmed.substring(eq + 1).trim();
+            CookieEntry existing = scored.get(key);
+            if (existing == null || score > existing.score) {
+                scored.put(key, new CookieEntry(url, value, score));
+            } else if (score == existing.score && value.length() > existing.value.length()) {
+                scored.put(key, new CookieEntry(url, value, score));
+            }
+        }
+    }
+
+    // Merge JS-accessible cookies (document.cookie) into the map.
+    // These are non-HTTPOnly but help catch cookies CookieManager might miss.
+    private void mergeJsCookies(Map<String, String> map, String jsCookieString) {
+        if (jsCookieString == null || jsCookieString.isEmpty()) return;
+        for (String part : jsCookieString.split(";")) {
+            String trimmed = part.trim();
+            if (trimmed.isEmpty()) continue;
+            int eq = trimmed.indexOf('=');
+            if (eq <= 0) continue;
+            String key = trimmed.substring(0, eq).trim();
+            String value = trimmed.substring(eq + 1).trim();
+            // Only add if not already present (CookieManager takes precedence)
+            if (!map.containsKey(key) || map.get(key).isEmpty()) {
+                map.put(key, value);
+            }
+        }
     }
 
     private String buildOrderedCookie(Map<String, String> map) {
@@ -387,42 +441,59 @@ public class QQLoginWebViewActivity extends AppCompatActivity {
         CookieManager cm = CookieManager.getInstance();
         cm.flush();
         Log.i(T, "CookieManager flushed, collecting final cookies... (partial=" + partial + ")");
-        // Three-round collection with longer intervals to capture late JS-set cookies
-        // (PC Electron reads the cookie store synchronously, but Android CookieManager
-        // needs flush + delay for async cookie writes to land)
+        // Multi-round collection: CookieManager.flush() is async; we sample at
+        // increasing intervals to catch late-landing cookies. We also inject JS
+        // to grab document.cookie (catches non-HTTPOnly cookies set by page JS).
         handler.postDelayed(() -> {
             Map<String, String> round1 = collectCookiesFromAllDomains(cm);
+            dumpJsCookies(round1); // merge JS-accessible cookies
             handler.postDelayed(() -> {
                 Map<String, String> round2 = collectCookiesFromAllDomains(cm);
+                dumpJsCookies(round2);
                 handler.postDelayed(() -> {
                     Map<String, String> round3 = collectCookiesFromAllDomains(cm);
-                    // Merge: later rounds override (latest value wins within same score tier)
-                    Map<String, String> finalMap = new LinkedHashMap<>(round1);
-                    finalMap.putAll(round2);
-                    finalMap.putAll(round3);
-                    // Re-score and re-collect to ensure domain preference
-                    // (round3 from qq.com shouldn't clobber round1 from y.qq.com)
+                    dumpJsCookies(round3);
+                    // Merge preferring earlier rounds for domain-scored cookies,
+                    // but later rounds win for length (newer values)
                     Map<String, String> merged = mergeWithDomainPreference(round1, round2, round3);
                     String cookie = buildOrderedCookie(merged);
+                    // Log key cookie presence for debugging
+                    Log.i(T, "Final cookies: uin=" + merged.containsKey("uin") +
+                            " qm_keyst=" + merged.containsKey("qm_keyst") +
+                            " p_skey=" + merged.containsKey("p_skey") +
+                            " skey=" + merged.containsKey("skey") +
+                            " pt4_token=" + merged.containsKey("pt4_token") +
+                            " count=" + merged.size());
                     postCookieToServer(cookie);
                     sendResult(cookie, partial);
-                }, 2000);
+                }, 2500);
             }, 2000);
-        }, 800);
+        }, 1000);
+    }
+
+    private void dumpJsCookies(Map<String, String> map) {
+        if (webView == null) return;
+        try {
+            webView.evaluateJavascript("(function(){return document.cookie||'';})()", value -> {
+                if (value != null && !value.isEmpty() && !"null".equals(value)) {
+                    // evaluateJavascript wraps result in quotes, strip them
+                    String jsCookie = value;
+                    if (jsCookie.startsWith("\"") && jsCookie.endsWith("\"")) {
+                        jsCookie = jsCookie.substring(1, jsCookie.length() - 1);
+                    }
+                    jsCookie = jsCookie.replace("\\\"", "\"").replace("\\\\", "\\");
+                    mergeJsCookies(map, jsCookie);
+                    Log.i(T, "JS document.cookie: " + jsCookie.length() + " chars");
+                }
+            });
+        } catch (Exception e) {
+            Log.w(T, "JS cookie dump failed: " + e.getMessage());
+        }
     }
 
     // Merge three rounds preferring values from higher-score domains
     private Map<String, String> mergeWithDomainPreference(
             Map<String, String> r1, Map<String, String> r2, Map<String, String> r3) {
-        // Re-collect across all three rounds with scoring
-        Map<String, CookieEntry> scored = new LinkedHashMap<>();
-        Map<String, String>[] rounds = new Map[]{r1, r2, r3};
-        // Hardcoded domain scores for common patterns in cookie values
-        // We don't know which domain each value came from in isolation,
-        // so we use the rounds as proxy: earlier rounds (r1) are from
-        // first flash, later rounds (r3) are most recent.
-        // Strategy: take the first non-empty value per key, but allow
-        // r3 to win if the value is substantially different (new key issued)
         Map<String, String> result = new LinkedHashMap<>(r1);
         for (Map.Entry<String, String> e : r2.entrySet()) {
             String existing = result.get(e.getKey());
