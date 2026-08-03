@@ -385,7 +385,7 @@ if exist "!GW_PROPERTIES!" (
       "$mirr = 'https\://mirrors.cloud.tencent.com/gradle/'; " ^
       "if ($c.Contains($orig)) { " ^
       "  $c = $c.Replace($orig, $mirr); " ^
-      "  $utf8nobom = New-Object System.Text.UTF8Encoding(`$false); [System.IO.File]::WriteAllText(`$gw, `$c, `$utf8nobom); " ^
+      "  $utf8nobom = New-Object System.Text.UTF8Encoding($false); [System.IO.File]::WriteAllText($gw, $c, $utf8nobom); " ^
       "  Write-Host '  OK - mirrors.cloud.tencent.com/gradle/'; " ^
       "} else { Write-Host '  Already using mirror or custom URL, skipped.' }" 2>&1
 ) else (
