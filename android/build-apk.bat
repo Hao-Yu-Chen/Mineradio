@@ -7,6 +7,25 @@ setlocal enabledelayedexpansion
 ::  Auto-downloads JDK 17 & Android SDK if missing.
 :: ============================================================
 
+:: ============================================================
+::  Mirror Configuration - China mainland mirrors
+::  All URLs verified: 2026-08-03
+::  If any mirror breaks, update the URL here.
+:: ============================================================
+set "NPM_REGISTRY=https://registry.npmmirror.com"
+set "NPM_REGISTRY_FALLBACK=https://registry.npmjs.org"
+
+set "GRADLE_DIST_MIRROR=https://mirrors.cloud.tencent.com/gradle"
+set "GRADLE_DIST_MIRROR2=https://mirrors.huaweicloud.com/gradle"
+set "GRADLE_DIST_ORIGINAL=https://services.gradle.org/distributions"
+
+set "MAVEN_ALIYUN_PUBLIC=https://maven.aliyun.com/repository/public"
+set "MAVEN_ALIYUN_GOOGLE=https://maven.aliyun.com/repository/google"
+
+set "JDK_MIRROR_HUAWEI=https://mirrors.huaweicloud.com/openjdk"
+set "JDK_MIRROR_TSINGHUA=https://mirrors.tuna.tsinghua.edu.cn/Adoptium"
+set "JDK_API_ORIGINAL=https://api.adoptium.net"
+
 :: Go to script directory
 cd /d "%~dp0"
 set SCRIPT_DIR=%~dp0
@@ -67,18 +86,57 @@ if exist "!LOCAL_JDK!\bin\java.exe" (
     goto auto_setup_sdk
 )
 
-echo   Downloading JDK 17 from Adoptium...
+echo   Downloading JDK 17 (mirrors ^> original ^> error)...
 set JDK_ZIP=!SCRIPT_DIR!jdk_temp.zip
 powershell -NoProfile -Command ^
   "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; " ^
-  "$url = 'https://api.adoptium.net/v3/binary/latest/17/ga/windows/x64/jdk/hotspot/normal/eclipse'; " ^
-  "$wc = New-Object System.Net.WebClient; " ^
-  "Write-Host '  Connecting...'; " ^
-  "try { $wc.DownloadFile($url, '!JDK_ZIP!'); Write-Host '  Download complete.' } " ^
-  "catch { Write-Host '[ERROR] JDK download failed: ' + $_.Exception.Message; exit 1 }"
+  "$outPath = '!JDK_ZIP!'; $done = $false; $err = ''; " ^
+  "$pkgName = ''; $relName = ''; " ^
+  "$apiBinary = 'https://api.adoptium.net/v3/binary/latest/17/ga/windows/x64/jdk/hotspot/normal/eclipse'; " ^
+  "$apiInfo   = 'https://api.adoptium.net/v3/assets/latest/17/hotspot'; " ^
+  "Write-Host '  Fetching version info from Adoptium API...'; " ^
+  "try { " ^
+  "  $ir = Invoke-WebRequest -Uri $apiInfo -TimeoutSec 10 -UseBasicParsing; " ^
+  "  $data = ConvertFrom-Json $ir.Content; " ^
+  "  $bin = $data | Where-Object { $_.binary.os -eq 'windows' -and $_.binary.architecture -eq 'x64' -and $_.binary.image_type -eq 'jdk' } | Select-Object -First 1; " ^
+  "  if ($bin) { $pkgName = $bin.binary.package.name; $relName = $bin.release_name; $os = $bin.binary.os; $arch = $bin.binary.architecture; $img = $bin.binary.image_type; " ^
+  "    Write-Host ('  Latest JDK 17: ' + $pkgName); } " ^
+  "  else { Write-Host '  Could not parse version info, will use fallback URLs'; } " ^
+  "} catch { $err = $_.Exception.Message; Write-Host ('  Version info failed: ' + $err.Substring(0,[Math]::Min(100,$err.Length))); }; " ^
+  "Write-Host '  [1/3] Trying Tsinghua Adoptium mirror...'; " ^
+  "if ($pkgName -and $relName) { " ^
+  "  try { " ^
+  "    $mirror1 = \"https://mirrors.tuna.tsinghua.edu.cn/Adoptium/17/jdk/hotspot/normal/eclipse/$os/$arch/$img/hotspot/$relName/$pkgName\"; " ^
+  "    Invoke-WebRequest -Uri $mirror1 -OutFile $outPath -TimeoutSec 600 -UseBasicParsing; " ^
+  "    Write-Host '  OK - Tsinghua mirror'; $done = $true; " ^
+  "  } catch { $err = $_.Exception.Message; Write-Host ('  Tsinghua failed: ' + $err.Substring(0,[Math]::Min(100,$err.Length))); }; " ^
+  "} else { Write-Host '  Skipped - no version info'; }; " ^
+  "if (-not $done) { " ^
+  "  Write-Host '  [2/3] Trying Huawei OpenJDK mirror...'; " ^
+  "  try { " ^
+  "    if ($pkgName -and $relName) { " ^
+  "      $mirror2 = \"https://mirrors.huaweicloud.com/openjdk/$relName/$pkgName\"; " ^
+  "    } else { " ^
+  "      $mirror2 = 'https://mirrors.huaweicloud.com/openjdk/17.0.12/OpenJDK17U-jdk_x64_windows_hotspot_17.0.12_7.zip'; " ^
+  "    }; " ^
+  "    Invoke-WebRequest -Uri $mirror2 -OutFile $outPath -TimeoutSec 600 -UseBasicParsing; " ^
+  "    Write-Host '  OK - Huawei mirror'; $done = $true; " ^
+  "  } catch { $err = $_.Exception.Message; Write-Host ('  Huawei failed: ' + $err.Substring(0,[Math]::Min(100,$err.Length))); }; " ^
+  "} " ^
+  "if (-not $done) { " ^
+  "  Write-Host '  [3/3] Trying Adoptium API (original non-mirror)...'; " ^
+  "  try { " ^
+  "    Invoke-WebRequest -Uri $apiBinary -OutFile $outPath -TimeoutSec 600 -UseBasicParsing; " ^
+  "    Write-Host '  OK - Adoptium API (original)'; $done = $true; " ^
+  "  } catch { $err = $_.Exception.Message; Write-Host ('  Original failed: ' + $err.Substring(0,[Math]::Min(100,$err.Length))); }; " ^
+  "} " ^
+  "if (-not $done) { Write-Host '[ERROR] All download sources exhausted (mirrors + original).'; Write-Host '  Please check your internet connection.'; Write-Host '  Manual download: https://mirrors.tuna.tsinghua.edu.cn/Adoptium/'; exit 1 }"
 
 if %errorlevel% neq 0 (
-    echo   [ERROR] Failed to download JDK. Check your internet connection.
+    echo   [ERROR] Failed to download JDK. Please check your internet connection.
+    echo   Manual download sites:
+    echo     - https://mirrors.tuna.tsinghua.edu.cn/Adoptium/
+    echo     - https://mirrors.huaweicloud.com/openjdk/
     pause
     exit /b 1
 )
@@ -273,7 +331,12 @@ echo   Installing Node.js backend dependencies ---
 if exist "www\nodejs-project\package.json" (
     set "_SAVEDIR=!CD!"
     cd /d "!CD!\www\nodejs-project"
-    call npm install --production --silent
+    call npm install --production --silent --registry=!NPM_REGISTRY!
+	    if errorlevel 1 (
+	        echo   Mirror failed, retrying with npmjs.org...
+	        call npm install --production --silent --registry=!NPM_REGISTRY_FALLBACK!
+	        if errorlevel 1 echo   WARNING: npm install failed with both registries! Backend dependencies may be missing.
+	    )
     cd /d "!_SAVEDIR!"
 )
 
@@ -294,8 +357,12 @@ if exist "www\nodejs-project\node_modules" (
 
 :: ---- Step 3: npm install ----
 echo [3/5] Installing Capacitor dependencies...
-call npm install --silent 2>nul
-if errorlevel 1 echo   WARNING: npm install had issues, continuing...
+call npm install --silent --registry=!NPM_REGISTRY! 2>nul
+if errorlevel 1 (
+    echo   Mirror failed, retrying with npmjs.org...
+    call npm install --silent --registry=!NPM_REGISTRY_FALLBACK! 2>nul
+    if errorlevel 1 echo   WARNING: npm install had issues, continuing...
+)
 
 :: ---- Step 4: Capacitor sync ----
 echo [4/5] Syncing Capacitor...
@@ -304,6 +371,25 @@ if errorlevel 1 (
     echo [ERROR] Capacitor sync failed!
     pause
     exit /b 1
+)
+
+:: ---- Gradle wrapper mirror ----
+:: Patch gradle-wrapper.properties to use China mirror for Gradle distribution download
+set "GW_PROPERTIES=%~dp0android\gradle\wrapper\gradle-wrapper.properties"
+if exist "!GW_PROPERTIES!" (
+    echo   Patching Gradle wrapper distribution URL to China mirror...
+    powershell -NoProfile -Command ^
+      "$gw = '!GW_PROPERTIES!'; " ^
+      "$c = Get-Content $gw -Raw -Encoding UTF8; " ^
+      "$orig = 'https\://services.gradle.org/distributions/'; " ^
+      "$mirr = 'https\://mirrors.cloud.tencent.com/gradle/'; " ^
+      "if ($c.Contains($orig)) { " ^
+      "  $c = $c.Replace($orig, $mirr); " ^
+      "  $utf8nobom = New-Object System.Text.UTF8Encoding(`$false); [System.IO.File]::WriteAllText(`$gw, `$c, `$utf8nobom); " ^
+      "  Write-Host '  OK - mirrors.cloud.tencent.com/gradle/'; " ^
+      "} else { Write-Host '  Already using mirror or custom URL, skipped.' }" 2>&1
+) else (
+    echo   [WARNING] gradle-wrapper.properties not found, skipping mirror patch
 )
 
 :: ---- Step 5: Build APK ----
@@ -321,8 +407,9 @@ cd /d "!GRADLE_DIR!"
 echo   Working dir: %cd%
 
 :: Clean stale build cache to prevent stale asset contamination
-echo   Cleaning Gradle build cache...
-call gradlew.bat clean 2>&1 >nul
+:: First run will download Gradle distribution + Maven deps (~300MB), may take minutes
+echo   Cleaning Gradle build cache (first run may download ~300MB deps)...
+call gradlew.bat clean 2>&1
 echo   Build cache cleaned
 
 if /i "!BUILD_TYPE!"=="release" (
