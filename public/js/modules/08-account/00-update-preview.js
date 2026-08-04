@@ -27,10 +27,8 @@ function updateProgressDetailText() {
   return parts.join(' · ');
 }
 function initUpdatePreview() {
-  renderUpdatePreviewPanel();
-  setUpdatePreviewVisible(true);
-  checkLatestUpdate();
-  setTimeout(startUpdateIconBreathing, 760);
+  // 已禁用自动更新检测
+  return;
 }
 
 function setUpdatePreviewVisible(visible) {
