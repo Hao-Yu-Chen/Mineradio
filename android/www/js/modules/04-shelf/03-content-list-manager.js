@@ -700,17 +700,39 @@ function makeContentListManager() {
         console.warn('[ShelfContentLoadingRender]', playlistId, renderLoadingErr);
       }
       var podcastCollectionKey = String(playlistId || '').indexOf('podcast:') === 0 ? String(playlistId).slice(8) : '';
+      var lxPlaylistId = String(playlistId || '').indexOf('lx:') === 0 ? String(playlistId).slice(3) : '';
       var qqPlaylistId = String(playlistId || '').indexOf('qq:') === 0 ? String(playlistId).slice(3) : '';
       var kugouPlaylistId = String(playlistId || '').indexOf('kugou:') === 0 ? String(playlistId).slice(6) : '';
       var qishuiPlaylistId = String(playlistId || '').indexOf('qishui:') === 0 ? String(playlistId).slice(7) : '';
       var spotifyPlaylistId = String(playlistId || '').indexOf('spotify:') === 0 ? String(playlistId).slice(8) : '';
       contentKind = podcastCollectionKey ? 'podcast' : 'playlist';
-      contentSource = podcastCollectionKey ? null : {
+      contentSource = lxPlaylistId ? { provider: 'lx', id: lxPlaylistId }
+        : (podcastCollectionKey ? null : {
         provider: qqPlaylistId ? 'qq' : (kugouPlaylistId ? 'kugou' : (qishuiPlaylistId ? 'qishui' : (spotifyPlaylistId ? 'spotify' : 'netease'))),
         id: qqPlaylistId || kugouPlaylistId || qishuiPlaylistId || spotifyPlaylistId || playlistId
-      };
+      });
       // 拉取歌单/播客集合
       var r = null;
+      if (lxPlaylistId) {
+        // LX 歌单：直接从本地 lxPlaylists 读取
+        var lxPl = (typeof lxPlaylists !== 'undefined' && lxPlaylists)
+          ? lxPlaylists.find(function(p) { return p.id === lxPlaylistId; })
+          : null;
+        if (!lxPl || !lxPl.songs || !lxPl.songs.length) {
+          allTracks = [{ name: '歌单为空', artist: '' }];
+          panelDirty = true;
+          rowsDirty = true;
+          startRowsLoadedIntro();
+          syncRenderedRows(true);
+          return;
+        }
+        r = { tracks: lxPl.songs.map(function(s) {
+          // Normalize LX song IDs for drawRow (playable check depends on song.id)
+          var ns = Object.assign({}, s);
+          if (!ns.id) ns.id = s.songmid || s.hash || '';
+          return ns;
+        }), nextOffset: lxPl.songs.length, total: lxPl.songs.length, hasMore: false };
+      } else {
       try {
         r = podcastCollectionKey
           ? await apiJson('/api/podcast/my/items?key=' + encodeURIComponent(podcastCollectionKey) + '&limit=' + PLAYLIST_LAZY_BATCH_SIZE)
@@ -738,6 +760,7 @@ function makeContentListManager() {
         showToast('歌单加载失败');
         return;
       }
+      } // end else (non-LX API fetch)
       if (!open || token !== requestToken) return;
       try {
         // 清 loading

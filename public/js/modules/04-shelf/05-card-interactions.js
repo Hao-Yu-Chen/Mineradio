@@ -214,4 +214,97 @@ renderer.domElement.addEventListener('wheel', function (e) {
   }
 }, { passive: false, capture: true });
 
+// ── 触摸滑动（Android / 触屏设备）──
+// Touch 只处理滑动；点击由浏览器合成 click 事件 → 复用已有 mouse click handler
+var _touchState = {
+  startX: 0, startY: 0, lastY: 0,
+  active: false, hasMoved: false, contentList: false
+};
+
+function _touchClientPos(e) {
+  var t = e.touches && e.touches[0];
+  if (t) return { x: t.clientX, y: t.clientY };
+  return { x: 0, y: 0 };
+}
+
+function _touchIsOverUi(e) {
+  var pos = _touchClientPos(e);
+  if (!pos.x && !pos.y) return false;
+  var el = document.elementFromPoint(pos.x, pos.y);
+  if (!el) return false;
+  // If the element is the canvas itself, it's NOT UI
+  if (el === renderer.domElement || el.tagName === 'CANVAS') return false;
+  return !!(el.closest && el.closest(UI_HIT_SELECTOR || '.panel, .modal, .dialog, .sidebar, .menu, .popup, .toast, button, input, select, textarea, [data-ui="1"]'));
+}
+
+function _shelfTouchStart(e) {
+  if (_touchIsOverUi(e)) return;
+  if (!shelfManager || shelfManager.getMode() === 'off') return;
+  var t = e.touches[0];
+  if (!t) return;
+  _touchState.startX = t.clientX;
+  _touchState.startY = t.clientY;
+  _touchState.lastY = t.clientY;
+  _touchState.active = true;
+  _touchState.hasMoved = false;
+  _touchState.contentList = !!(shelfManager.hasOpenContent && shelfManager.hasOpenContent());
+}
+
+function _shelfTouchMove(e) {
+  if (!_touchState.active) return;
+  var t = e.touches[0];
+  if (!t) { _touchState.active = false; return; }
+  var dy = _touchState.lastY - t.clientY;
+  var dx = _touchState.startX - t.clientX;
+  _touchState.lastY = t.clientY;
+  if (Math.abs(dy) < 6 && Math.abs(dx) < 6) return;
+  _touchState.hasMoved = true;
+  // Only preventDefault for actual scrolls (lets taps through as click)
+  if (Math.abs(dy) >= 6) {
+    e.preventDefault();
+  }
+  markRenderInteraction('shelf-touch', 900);
+  if (_touchState.contentList) {
+    var cl = shelfManager.getContentList && shelfManager.getContentList();
+    if (cl && cl.scrollBy) cl.scrollBy(dy > 0 ? 1 : -1);
+  } else {
+    if (shelfManager.scrollBy) shelfManager.scrollBy(dy > 0 ? 1 : -1);
+  }
+}
+
+function _shelfTouchEnd() {
+  // Reset mouseDownAt.hadDrag so the synthesized click is not suppressed
+  if (_touchState.hasMoved && typeof mouseDownAt !== 'undefined') {
+    mouseDownAt.hadDrag = false;
+  }
+  _touchState.active = false;
+  _touchState.hasMoved = false;
+}
+
+// Canvas touch listeners
+renderer.domElement.addEventListener('touchstart', _shelfTouchStart, { passive: true, capture: true });
+renderer.domElement.addEventListener('touchmove', _shelfTouchMove, { passive: false, capture: true });
+renderer.domElement.addEventListener('touchend', _shelfTouchEnd, { passive: true, capture: true });
+
+// Window fallback for Android WebView
+window.addEventListener('touchstart', function (e) {
+  if (_touchState.active) return;
+  var t = e.touches[0];
+  if (!t) return;
+  var r = renderer.domElement.getBoundingClientRect();
+  if (t.clientX < r.left || t.clientX > r.right || t.clientY < r.top || t.clientY > r.bottom) return;
+  _shelfTouchStart(e);
+}, { passive: true, capture: true });
+window.addEventListener('touchmove', function (e) {
+  if (!_touchState.active) return;
+  _shelfTouchMove(e);
+}, { passive: false, capture: true });
+window.addEventListener('touchend', function () {
+  if (!_touchState.active) return;
+  _shelfTouchEnd();
+}, { passive: true, capture: true });
+
+// Canvas CSS: prevent browser default gestures on 3D view
+try { renderer.domElement.style.touchAction = 'pan-x pinch-zoom'; } catch (_) {}
+
 // 键盘 / 全局事件

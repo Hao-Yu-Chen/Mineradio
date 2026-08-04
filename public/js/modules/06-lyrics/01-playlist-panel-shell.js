@@ -606,6 +606,12 @@ function requestNextPlaylistCatalogPage(reason) {
   return true;
 }
 async function refreshUserPlaylists(force) {
+  // LX 模式：使用 LX 独立歌单系统
+  if (typeof fx !== 'undefined' && fx && fx.lxSourceEnabled) {
+    if (typeof renderLxSidebarPlaylists === 'function') renderLxSidebarPlaylists();
+    if (typeof renderLxSidebar === 'function') renderLxSidebar();
+    return;
+  }
   if (!loginStatus.loggedIn && !qqLoginStatus.loggedIn && !kugouLoginStatus.loggedIn && !qishuiLoginStatus.loggedIn && !spotifyLoginStatus.loggedIn) {
     resetPlaylistPanelRenderLimit();
     document.getElementById('pl-list').innerHTML = '<div style="text-align:center;padding:24px 0;color:rgba(255,255,255,.32);font-size:11.5px">登录后显示个人歌单</div>';

@@ -155,6 +155,8 @@ function addToLxPlaylist(plId, song) {
     }
   pl.songs.push(lxStoreSong(song));
   saveLxPlaylists();
+  updateLxLocalCounts();
+  if (typeof scheduleShelfRebuild === 'function') scheduleShelfRebuild('lx-song-add');
   if (typeof showToast === 'function') showToast('已收藏到 ' + pl.name);
   }
 
@@ -164,6 +166,9 @@ function createLxPlaylist(name) {
   var pl = { id: 'lx_pl_' + Date.now(), name: name, songs: [], createdAt: new Date().toISOString() };
   lxPlaylists.push(pl);
   saveLxPlaylists();
+  // 同步更新 UI
+  renderLxSidebarPlaylists();
+  if (typeof scheduleShelfRebuild === 'function') scheduleShelfRebuild('lx-playlist-create');
   return pl;
   }
 
@@ -174,6 +179,7 @@ function removeLxPlaylist(plId) {
   saveLxPlaylists();
   if (lxSidebarExpanded === plId) lxSidebarExpanded = null;
   renderLxSidebarPlaylists();
+  if (typeof scheduleShelfRebuild === 'function') scheduleShelfRebuild('lx-playlist-remove');
   if (typeof showToast === 'function') showToast('歌单已删除');
   }
 
@@ -183,6 +189,7 @@ function removeLxPlaylistSong(plId, idx) {
   pl.songs.splice(idx, 1);
   saveLxPlaylists();
   renderLxSidebarPlaylists();
+  if (typeof scheduleShelfRebuild === 'function') scheduleShelfRebuild('lx-playlist-song-remove');
   if (typeof showToast === 'function') showToast('已从歌单移除');
   }
 
@@ -250,13 +257,18 @@ function renderLxSidebar() {
     if (pp) pp.style.display = 'none';
     // 替换歌单工具栏为导入按钮
     _renderLxPlToolbar();
+    // 强制刷新 LX 歌单内容（无论当前在哪个 tab）
+    renderLxSidebarPlaylists();
   } else {
     if (plTab) plTab.textContent = '我的歌单';
     if (podcastTab) podcastTab.style.display = '';
     // 恢复原始工具栏
     _restoreLxPlToolbar();
+    // 切换回默认模式时重新加载平台歌单
+    if (typeof refreshUserPlaylists === 'function') refreshUserPlaylists();
     }
-  if (typeof queueViewTab !== 'undefined' && queueViewTab === 'playlists' && fx.lxSourceEnabled) renderLxSidebarPlaylists();
+  // 重建书架以反映 LX/默认 歌单切换
+  if (typeof scheduleShelfRebuild === 'function') scheduleShelfRebuild('lx-mode-switch');
   }
 
 function _renderLxPlToolbar() {

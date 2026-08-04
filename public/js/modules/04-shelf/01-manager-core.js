@@ -61,6 +61,33 @@ function makeShelfManager() {
   }
 
   function currentItems() {
+    // LX 模式：使用 LX 独立歌单
+    if (typeof fx !== 'undefined' && fx && fx.lxSourceEnabled && typeof lxPlaylists !== 'undefined') {
+      var lxItems = [];
+      lxPlaylists.forEach(function (pl) {
+        var firstSong = pl.songs && pl.songs.length && pl.songs[0];
+        var cover = (firstSong && (firstSong.cover || firstSong.img || firstSong.thumb)) || '';
+        lxItems.push({
+          type: 'playlist',
+          title: pl.name,
+          sub: 'LX · ' + (pl.songs ? pl.songs.length : 0) + ' 首',
+          cover: cover,
+          tag: pl.id === 'lx_fav' ? '我喜欢' : 'LX歌单',
+          playlistId: 'lx:' + pl.id,
+          provider: 'lx'
+        });
+      });
+      if (lxItems.length) return lxItems;
+      if (playQueue.length) {
+        return playQueue.map(function (song, idx) {
+          return {
+            type: 'queue', title: song.name, sub: song.artist || '未知歌手',
+            cover: songCoverSrc(song, 360), tag: idx === currentIdx ? '正在播放' : ('#' + (idx + 1)), queueIndex: idx
+          };
+        });
+      }
+      return [];
+    }
     if (hasAnyPlatformLogin() && (userPlaylists.length || myPodcastCollections.length)) {
       var source = activePlaylists();
       var items = source.map(function (pl) {
@@ -543,6 +570,17 @@ function makeShelfManager() {
     var action = card.mesh.userData.action;
     if (!action || action.kind !== 'loadPlaylist' || !action.playlistId) return false;
     if (String(action.playlistId).indexOf('podcast:') === 0) return false;
+    // LX 歌单：直接调用 playLxPlaylist
+    if (String(action.playlistId).indexOf('lx:') === 0) {
+      var plId = String(action.playlistId).slice(3);
+      pulseCard(card, 1.05);
+      if (contentList && contentList.isOpen && contentList.isOpen()) contentList.close();
+      openCardIdx = -1;
+      setShelfPinnedOpen(false, true);
+      if (typeof setFocusZone === 'function') setFocusZone(null, true);
+      if (typeof playLxPlaylist === 'function') playLxPlaylist(plId);
+      return true;
+    }
     pulseCard(card, 1.05);
     if (contentList && contentList.isOpen && contentList.isOpen()) contentList.close();
     openCardIdx = -1;
